@@ -1,0 +1,6 @@
+# .NET
+bin/
+obj/
+
+# secretos locales
+appsettings.Local.json
