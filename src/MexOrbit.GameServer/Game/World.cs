@@ -32,7 +32,7 @@ public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId)
 public sealed record ChatSendCmd(IClientPort Port, ulong RequestId, ChatChannel Channel, string Text) : WorldCmd;
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
-    RefineRecipe? refineRecipe, List<NpcPrice> npcPrices,
+    RefineRecipe? refineRecipe, List<NpcPrice> npcPrices, List<PortalInfo> portals,
     Repo repo, ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop)
 {
     // Diales de combate y loot del slice (documentados en el README del repo).
@@ -647,12 +647,20 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     /// <summary>Estado completo del mundo para un jugador: al entrar y al reconectar.</summary>
     private void SincronizarMundo(PlayerSlot slot)
     {
-        slot.Port.Send(new EnterMap
+        var entrada = new EnterMap
         {
             MapId = (ulong)map.Id, MapCode = map.Code,
             LimitsX = map.BoundsX, LimitsY = map.BoundsY, CargoRiskPct = 100,
             StationX = map.StationX, StationY = map.StationY, StationRange = map.SecureRange,
-        }.Encode());
+        };
+        // los portales van completos aqui: son mobiliario del mapa, no entidades
+        foreach (var p in portals)
+            entrada.Portals.Add(new MapPortal
+            {
+                PortalId = (ulong)p.Id, X = p.X, Y = p.Y,
+                TargetMapCode = p.TargetMapCode, IsWorking = p.IsWorking,
+            });
+        slot.Port.Send(entrada.Encode());
         var precios = new NpcPrices();
         foreach (var p in npcPrices)
             precios.Prices.Add(new MaterialPrice

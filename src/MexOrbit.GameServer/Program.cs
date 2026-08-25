@@ -24,7 +24,8 @@ var spawns = repo.LoadNpcSpawns(mapa.Id);
 var bias = repo.LoadZoneBias(mapa.ZoneTier);
 var receta = repo.LoadRefineRecipe();
 var precios = repo.LoadNpcPrices();
-var world = new World(mapa, spawns, bias, receta, precios, repo, log.CreateLogger<World>(),
+var portales = repo.LoadPortals(mapa.Id);
+var world = new World(mapa, spawns, bias, receta, precios, portales, repo, log.CreateLogger<World>(),
     tickMs, pingInterval, pingMisses);
 world.SpawnNpcs();
 

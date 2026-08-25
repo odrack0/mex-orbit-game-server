@@ -55,6 +55,18 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `GraceMs` | `Game-World.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
 | `ChatMaxLen` | `Game-World.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
 
+## Mobiliario del mapa
+
+Portales, estacion y POIs **no entran por relevancia**: viajan completos dentro de
+`EnterMap` al entrar al mapa (spec del protocolo). `LoadPortals` lee `map_portal`
+(solo los `is_visible`) y resuelve el `code` del mapa destino, para que el cliente
+sepa a donde lleva cada uno sin adivinar ids. `map_portal.target_map_id` es FK real
+—"el destino existe por construccion"— asi que crear un portal implica crear su
+mapa destino: por eso la migracion `.3` declara `1-2` junto al portal del `1-1`.
+
+El **salto** en si (con `portal_jump_delay_ms`, ya en `game_setting`) es de E3; hoy
+el portal es mobiliario visible y navegable.
+
 ## El escudo del jugador
 
 **v1 no tiene nano-casco**: las stats defensivas son dos, casco y escudo, y viajan

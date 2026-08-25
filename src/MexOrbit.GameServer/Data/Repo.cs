@@ -15,6 +15,8 @@ public sealed record MapInfo(long Id, string Code, string DisplayName, uint Boun
 
 public sealed record MaterialBias(long ItemId, string LootId, decimal Weight);
 
+public sealed record PortalInfo(long Id, uint X, uint Y, string TargetMapCode, bool IsWorking);
+
 public sealed record RefineRecipe(long OutputItemId, string OutputLootId, uint OutputAmount,
     Dictionary<long, uint> Ingredients);
 
@@ -45,6 +47,18 @@ public sealed class Repo(string connectionString)
                      m.zone_tier AS ZoneTier
               FROM map m JOIN map_station s ON s.map_id = m.id
               WHERE m.is_starter = 1 LIMIT 1");
+    }
+
+    /// <summary>Portales visibles del mapa. Viajan completos en EnterMap: no entran
+    /// por relevancia (spec del protocolo §relevancia por rango).</summary>
+    public List<PortalInfo> LoadPortals(long mapId)
+    {
+        using var db = Open();
+        return db.Query<PortalInfo>(
+            @"SELECT CAST(p.id AS SIGNED) AS Id, p.pos_x AS X, p.pos_y AS Y,
+                     d.code AS TargetMapCode, p.is_working AS IsWorking
+              FROM map_portal p JOIN map d ON d.id = p.target_map_id
+              WHERE p.map_id = @mapId AND p.is_visible = 1", new { mapId }).ToList();
     }
 
     public List<NpcSpawnInfo> LoadNpcSpawns(long mapId)
