@@ -106,6 +106,13 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                     var cb = CollectBox.Decode(frame);
                     world.Post(new CollectBoxCmd(this, cb.RequestId, cb.BoxId));
                     break;
+                case UnloadCargo.MsgId:
+                    world.Post(new UnloadCargoCmd(this, UnloadCargo.Decode(frame).RequestId));
+                    break;
+                case SellToNpc.MsgId:
+                    var sn = SellToNpc.Decode(frame);
+                    world.Post(new SellToNpcCmd(this, sn.RequestId, sn.MaterialId, sn.Amount));
+                    break;
                 case LogoutRequest.MsgId: world.Post(new LeaveCmd(this, "LOGOUT")); _cts.Cancel(); break;
                 default:
                     // mensaje desconocido o fuera de lugar: se ignora (jamas rompe la sesion)

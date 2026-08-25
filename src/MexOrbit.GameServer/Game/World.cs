@@ -24,8 +24,11 @@ public sealed record PongCmd(IClientPort Port, ulong Nonce) : WorldCmd;
 public sealed record SelectTargetCmd(IClientPort Port, ulong EntityId) : WorldCmd;
 public sealed record LaserToggleCmd(IClientPort Port, bool Active) : WorldCmd;
 public sealed record CollectBoxCmd(IClientPort Port, ulong RequestId, ulong BoxId) : WorldCmd;
+public sealed record UnloadCargoCmd(IClientPort Port, ulong RequestId) : WorldCmd;
+public sealed record SellToNpcCmd(IClientPort Port, ulong RequestId, string MaterialId, ulong Amount) : WorldCmd;
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
+    RefineRecipe? refineRecipe, List<NpcPrice> npcPrices,
     Repo repo, ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop)
 {
     // Diales de combate y loot del slice (documentados en el README del repo).
@@ -54,6 +57,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         public required Dictionary<long, uint> Cargo;   // server_item_id -> unidades
         public long NextAttackTick;
         public decimal Credits;
+        public bool EnBase;                              // dentro del rango de la estacion
         public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
     }
 
@@ -71,7 +75,14 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     private readonly Dictionary<ulong, NpcSpawnInfo> _npcInfo = new();  // entity_id -> catalogo
     private readonly Dictionary<ulong, BoxState> _boxes = new();
     private readonly List<(long Tick, NpcSpawnInfo Info, ulong Id)> _respawns = new();
-    private readonly Dictionary<long, string> _lootIds = zoneBias.ToDictionary(b => b.ItemId, b => b.LootId);
+    private readonly Dictionary<long, string> _lootIds =
+        zoneBias.ToDictionary(b => b.ItemId, b => b.LootId)
+            .Concat(npcPrices.ToDictionary(p => p.ItemId, p => p.LootId))
+            .Concat(refineRecipe is null
+                ? new Dictionary<long, string>()
+                : new Dictionary<long, string> { [refineRecipe.OutputItemId] = refineRecipe.OutputLootId })
+            .GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.First().Value);
+    private readonly Dictionary<string, NpcPrice> _preciosPorLoot = npcPrices.ToDictionary(p => p.LootId);
     private ulong _nextBoxId = 5_000_000;
     private readonly Random _rng = new(20260825);
     private long _tick;
@@ -144,7 +155,11 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             }
             npc.Step(dt);
         }
-        foreach (var slot in _players.Values) slot.Entity.Step(dt);
+        foreach (var slot in _players.Values)
+        {
+            slot.Entity.Step(dt);
+            ActualizarRangoBase(slot);
+        }
 
         // combate: laser encendido + objetivo vivo + en rango = un golpe por intervalo
         foreach (var slot in _players.Values)
@@ -213,7 +228,122 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             case SelectTargetCmd sel: OnSelectTarget(sel); break;
             case LaserToggleCmd laser: OnLaserToggle(laser); break;
             case CollectBoxCmd collect: OnCollectBox(collect); break;
+            case UnloadCargoCmd unload: OnUnloadCargo(unload); break;
+            case SellToNpcCmd sell: OnSellToNpc(sell); break;
         }
+    }
+
+    // ─── la base ────────────────────────────────────────────────────────────
+
+    /// <summary>Entrar o salir del rango de la estacion abre/cierra su panel.</summary>
+    private void ActualizarRangoBase(PlayerSlot slot)
+    {
+        var dist = Math.Sqrt(Math.Pow(map.StationX - slot.Entity.X, 2)
+                             + Math.Pow(map.StationY - slot.Entity.Y, 2));
+        var dentro = dist <= map.SecureRange;
+        if (dentro == slot.EnBase) return;
+        slot.EnBase = dentro;
+        slot.Port.Send(new StationRange { InRange = dentro, StationId = (ulong)map.Id }.Encode());
+    }
+
+    private void OnUnloadCargo(UnloadCargoCmd cmd)
+    {
+        var slot = SlotDe(cmd.Port);
+        if (slot is null) return;
+        if (!slot.EnBase)
+        {
+            slot.Port.Send(new ErrorReply
+            {
+                RequestId = cmd.RequestId, Code = ErrorCode.TooFar, Detail = "fuera de la base",
+            }.Encode());
+            return;
+        }
+        UnloadOutcome resultado;
+        try
+        {
+            // sincrono: la respuesta solo sale si la BD ya lo tiene
+            resultado = repo.UnloadAndRefine(slot.Data.AccountId, refineRecipe);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "fallo UnloadAndRefine cuenta {id}", slot.Data.AccountId);
+            slot.Port.Send(new ErrorReply { RequestId = cmd.RequestId, Code = ErrorCode.Generic }.Encode());
+            return;
+        }
+        slot.Cargo.Clear();
+        var msg = new UnloadResult { RequestId = cmd.RequestId };
+        foreach (var (itemId, amount) in resultado.Stored)
+            msg.Stored.Add(new MaterialAmount { MaterialId = _lootIds[itemId], Amount = amount });
+        foreach (var (itemId, amount) in resultado.Refined)
+            msg.Refined.Add(new MaterialAmount { MaterialId = _lootIds[itemId], Amount = amount });
+        slot.Port.Send(msg.Encode());
+        slot.Port.Send(HeroStatsDe(slot).Encode());
+        EnviarAlmacen(slot);
+    }
+
+    private void OnSellToNpc(SellToNpcCmd cmd)
+    {
+        var slot = SlotDe(cmd.Port);
+        if (slot is null) return;
+        if (!slot.EnBase)
+        {
+            slot.Port.Send(new ErrorReply
+            {
+                RequestId = cmd.RequestId, Code = ErrorCode.TooFar, Detail = "fuera de la base",
+            }.Encode());
+            return;
+        }
+        if (!_preciosPorLoot.TryGetValue(cmd.MaterialId, out var precio))
+        {
+            slot.Port.Send(new ErrorReply
+            {
+                RequestId = cmd.RequestId, Code = ErrorCode.Invalid, Detail = "el NPC no compra eso",
+            }.Encode());
+            return;
+        }
+        (uint Sold, decimal Gained, decimal NewCredits) venta;
+        try
+        {
+            venta = repo.SellToNpc(slot.Data.AccountId, precio.ItemId, (uint)cmd.Amount, precio.PriceCredits);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "fallo SellToNpc cuenta {id}", slot.Data.AccountId);
+            slot.Port.Send(new ErrorReply { RequestId = cmd.RequestId, Code = ErrorCode.Generic }.Encode());
+            return;
+        }
+        if (venta.Sold == 0)
+        {
+            slot.Port.Send(new ErrorReply
+            {
+                RequestId = cmd.RequestId, Code = ErrorCode.Insufficient, Detail = "sin existencias",
+            }.Encode());
+            return;
+        }
+        slot.Credits = venta.NewCredits;
+        slot.Port.Send(new SellResult
+        {
+            RequestId = cmd.RequestId,
+            CreditsGained = (ulong)venta.Gained,
+            NewCredits = (ulong)venta.NewCredits,
+        }.Encode());
+        slot.Port.Send(HeroStatsDe(slot).Encode());
+        EnviarAlmacen(slot);
+    }
+
+    private void EnviarAlmacen(PlayerSlot slot)
+    {
+        var accountId = slot.Data.AccountId;
+        var port = slot.Port;
+        // lectura fuera del hilo del tick: el estado ya se persistio
+        _ = Task.Run(() => Safe(() =>
+        {
+            var saldos = repo.LoadStorage(accountId);
+            var msg = new StorageState();
+            foreach (var (lootId, amount) in saldos)
+                msg.Materials.Add(new MaterialAmount { MaterialId = lootId, Amount = (uint)amount });
+            port.Send(msg.Encode());
+        }, "EnviarAlmacen"));
     }
 
     // ─── combate ────────────────────────────────────────────────────────────
@@ -429,7 +559,16 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         {
             MapId = (ulong)map.Id, MapCode = map.Code,
             LimitsX = map.BoundsX, LimitsY = map.BoundsY, CargoRiskPct = 100,
+            StationX = map.StationX, StationY = map.StationY, StationRange = map.SecureRange,
         }.Encode());
+        // precios del NPC: el cliente ya puede mostrar la tienda de la base
+        var precios = new NpcPrices();
+        foreach (var p in npcPrices)
+            precios.Prices.Add(new MaterialPrice
+            {
+                MaterialId = p.LootId, PriceCredits = (ulong)p.PriceCredits,
+            });
+        slot.Port.Send(precios.Encode());
         slot.Port.Send(hero.ToSpawn().Encode());
         slot.Port.Send(HeroStatsDe(slot).Encode());
         foreach (var otro in _players.Values) slot.Port.Send(otro.Entity.ToSpawn().Encode());
@@ -443,6 +582,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
 
         Broadcast(hero.ToSpawn().Encode());          // los demas ven llegar al heroe
         _players[join.Player.AccountId] = slot;
+        EnviarAlmacen(slot);
         log.LogInformation("cuenta {id} ({nombre}) entro al mapa {code}",
             join.Player.AccountId, join.Player.PilotName, map.Code);
     }

@@ -51,3 +51,4 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `BoxTtlMs` | `Game-World.cs` | 150 s | Vida de la caja (2-3 min, guidelines seccion 7) |
 | Write-behind | `Game-World.cs (Tick)` | 30 s | Cadencia maxima de persistencia de player_ship_state |
 | Deambular de NPCs | `Game-World.cs (Tick)` | p=0.004 por tick, radio 800 | El wander perezoso |
+| Rango de la estacion | BD `map_station.secure_range` | 1500 | Dentro de este radio se puede descargar y vender (dato, no constante) |
