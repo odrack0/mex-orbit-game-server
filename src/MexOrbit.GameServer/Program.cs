@@ -21,7 +21,8 @@ var log = app.Services.GetRequiredService<ILoggerFactory>();
 var repo = new Repo(conn);
 var mapa = repo.LoadStarterMap();
 var spawns = repo.LoadNpcSpawns(mapa.Id);
-var world = new World(mapa, spawns, repo, log.CreateLogger<World>(), tickMs, pingInterval, pingMisses);
+var bias = repo.LoadZoneBias(mapa.ZoneTier);
+var world = new World(mapa, spawns, bias, repo, log.CreateLogger<World>(), tickMs, pingInterval, pingMisses);
 world.SpawnNpcs();
 
 var verifier = new TicketVerifier(pubKeyPath);

@@ -18,6 +18,8 @@ public sealed class Entity
     public required uint Speed { get; init; }          // unidades por segundo
     public uint Hp { get; set; }
     public uint MaxHp { get; init; }
+    public uint Shield { get; set; }
+    public uint MaxShield { get; init; }
 
     public bool Moving => Math.Abs(X - TargetX) > 0.5 || Math.Abs(Y - TargetY) > 0.5;
 

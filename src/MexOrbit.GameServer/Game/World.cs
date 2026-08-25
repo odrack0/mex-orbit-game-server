@@ -16,14 +16,25 @@ public interface IClientPort
 }
 
 public abstract record WorldCmd;
-public sealed record JoinCmd(IClientPort Port, PlayerData Player, long SessionId) : WorldCmd;
+public sealed record JoinCmd(IClientPort Port, PlayerData Player, long SessionId, uint LaserDamage,
+    Dictionary<long, uint> Cargo) : WorldCmd;
 public sealed record LeaveCmd(IClientPort Port, string Reason) : WorldCmd;
 public sealed record MoveIntentCmd(IClientPort Port, MoveIntent Intent) : WorldCmd;
 public sealed record PongCmd(IClientPort Port, ulong Nonce) : WorldCmd;
+public sealed record SelectTargetCmd(IClientPort Port, ulong EntityId) : WorldCmd;
+public sealed record LaserToggleCmd(IClientPort Port, bool Active) : WorldCmd;
+public sealed record CollectBoxCmd(IClientPort Port, ulong RequestId, ulong BoxId) : WorldCmd;
 
-public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, ILogger<World> log,
-    int tickMs, int pingIntervalSeconds, int pingMissesToDrop)
+public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
+    Repo repo, ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop)
 {
+    // Diales de combate y loot del slice (documentados en el README del repo).
+    // Los numeros de JUEGO (recompensas, drops) viven en BD; esto es cadencia/alcance.
+    private const double LaserRange = 600;
+    private const int AttackIntervalMs = 500;
+    private const double CollectRange = 250;
+    private const int BoxTtlMs = 150_000;      // §7 guidelines: despawn de caja 2-3 min
+
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
 
     private sealed class PlayerSlot
@@ -36,10 +47,32 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, 
         public ulong PingNonce;
         public int PingMisses;
         public long LastPingTick;
+        // combate y carga
+        public ulong TargetId;
+        public bool LaserOn;
+        public required uint LaserDamage;
+        public required Dictionary<long, uint> Cargo;   // server_item_id -> unidades
+        public long NextAttackTick;
+        public decimal Credits;
+        public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
+    }
+
+    private sealed class BoxState
+    {
+        public required ulong Id;
+        public required double X;
+        public required double Y;
+        public required Dictionary<long, uint> Drops;   // server_item_id -> unidades
+        public required long ExpiraTick;
     }
 
     private readonly Dictionary<long, PlayerSlot> _players = new();     // account_id -> slot
     private readonly Dictionary<ulong, Entity> _npcs = new();
+    private readonly Dictionary<ulong, NpcSpawnInfo> _npcInfo = new();  // entity_id -> catalogo
+    private readonly Dictionary<ulong, BoxState> _boxes = new();
+    private readonly List<(long Tick, NpcSpawnInfo Info, ulong Id)> _respawns = new();
+    private readonly Dictionary<long, string> _lootIds = zoneBias.ToDictionary(b => b.ItemId, b => b.LootId);
+    private ulong _nextBoxId = 5_000_000;
     private readonly Random _rng = new(20260825);
     private long _tick;
 
@@ -50,24 +83,31 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, 
         ulong nextId = 1_000_000;
         foreach (var spawn in npcSpawns)
             for (var i = 0; i < spawn.Amount; i++)
-            {
-                var e = new Entity
-                {
-                    Id = nextId++,
-                    Kind = EntityKind.Npc,
-                    TypeId = spawn.Code,
-                    Name = spawn.DisplayName,
-                    Speed = spawn.Speed,
-                    Hp = spawn.MaxHp,
-                    MaxHp = spawn.MaxHp,
-                    X = _rng.Next(500, (int)map.BoundsX - 500),
-                    Y = _rng.Next(500, (int)map.BoundsY - 500),
-                };
-                e.TargetX = e.X;
-                e.TargetY = e.Y;
-                _npcs[e.Id] = e;
-            }
+                SpawnNpc(spawn, nextId++);
         log.LogInformation("Mapa {code}: {n} NPCs poblados", map.Code, _npcs.Count);
+    }
+
+    private Entity SpawnNpc(NpcSpawnInfo spawn, ulong id)
+    {
+        var e = new Entity
+        {
+            Id = id,
+            Kind = EntityKind.Npc,
+            TypeId = spawn.Code,
+            Name = spawn.DisplayName,
+            Speed = spawn.Speed,
+            Hp = spawn.MaxHp,
+            MaxHp = spawn.MaxHp,
+            Shield = spawn.MaxShield,
+            MaxShield = spawn.MaxShield,
+            X = _rng.Next(500, (int)map.BoundsX - 500),
+            Y = _rng.Next(500, (int)map.BoundsY - 500),
+        };
+        e.TargetX = e.X;
+        e.TargetY = e.Y;
+        _npcs[e.Id] = e;
+        _npcInfo[e.Id] = spawn;
+        return e;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -102,6 +142,33 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, 
             npc.Step(dt);
         }
         foreach (var slot in _players.Values) slot.Entity.Step(dt);
+
+        // combate: laser encendido + objetivo vivo + en rango = un golpe por intervalo
+        foreach (var slot in _players.Values)
+        {
+            if (!slot.LaserOn || _tick < slot.NextAttackTick) continue;
+            if (!_npcs.TryGetValue(slot.TargetId, out var npc)) { slot.LaserOn = false; continue; }
+            var dist = Math.Sqrt(Math.Pow(npc.X - slot.Entity.X, 2) + Math.Pow(npc.Y - slot.Entity.Y, 2));
+            if (dist > LaserRange) continue;    // fuera de rango: el laser espera, no se apaga
+            slot.NextAttackTick = _tick + AttackIntervalMs / tickMs;
+            AplicarDanio(slot, npc);
+        }
+
+        // cajas: expiran a los 2-3 min (§7)
+        if (_tick % (1000 / tickMs) == 0)
+            foreach (var caja in _boxes.Values.Where(b => _tick >= b.ExpiraTick).ToList())
+            {
+                _boxes.Remove(caja.Id);
+                Broadcast(new BoxDespawn { BoxId = caja.Id, Reason = BoxDespawnReason.Expired }.Encode());
+            }
+
+        // respawns de NPC
+        foreach (var (cuando, info, id) in _respawns.Where(r => _tick >= r.Tick).ToList())
+        {
+            _respawns.Remove((cuando, info, id));
+            var e = SpawnNpc(info, id);
+            Broadcast(e.ToSpawn().Encode());
+        }
 
         // heartbeat: ping con nonce; N sin respuesta = socket muerto
         var pingCadaTicks = pingIntervalSeconds * 1000 / tickMs;
@@ -140,8 +207,176 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, 
             case LeaveCmd leave: OnLeave(leave); break;
             case MoveIntentCmd move: OnMoveIntent(move); break;
             case PongCmd pong: OnPong(pong); break;
+            case SelectTargetCmd sel: OnSelectTarget(sel); break;
+            case LaserToggleCmd laser: OnLaserToggle(laser); break;
+            case CollectBoxCmd collect: OnCollectBox(collect); break;
         }
     }
+
+    // ─── combate ────────────────────────────────────────────────────────────
+
+    private void OnSelectTarget(SelectTargetCmd sel)
+    {
+        var slot = SlotDe(sel.Port);
+        if (slot is null) return;
+        if (sel.EntityId == 0 || !_npcs.TryGetValue(sel.EntityId, out var npc))
+        {
+            slot.TargetId = 0;
+            slot.LaserOn = false;
+            return;
+        }
+        slot.TargetId = sel.EntityId;
+        slot.Port.Send(new TargetInfo
+        {
+            EntityId = npc.Id, Hp = npc.Hp, MaxHp = npc.MaxHp,
+            Shield = npc.Shield, MaxShield = npc.MaxShield,
+        }.Encode());
+    }
+
+    private void OnLaserToggle(LaserToggleCmd laser)
+    {
+        var slot = SlotDe(laser.Port);
+        if (slot is null) return;
+        slot.LaserOn = laser.Active && slot.TargetId != 0;
+    }
+
+    private void AplicarDanio(PlayerSlot slot, Entity npc)
+    {
+        // el escudo absorbe primero; los valores del evento son POST-daño, siempre
+        var danio = slot.LaserDamage;
+        var alEscudo = Math.Min(npc.Shield, danio);
+        npc.Shield -= alEscudo;
+        var alCasco = Math.Min(npc.Hp, danio - alEscudo);
+        npc.Hp -= alCasco;
+        Broadcast(new AttackEvent
+        {
+            AttackerId = slot.Entity.Id, TargetId = npc.Id, Weapon = Weapon.Laser,
+            Damage = danio, TargetHp = npc.Hp, TargetShield = npc.Shield, Missed = false,
+        }.Encode());
+        if (npc.Hp == 0) OnNpcMuerto(slot, npc);
+    }
+
+    private void OnNpcMuerto(PlayerSlot slot, Entity npc)
+    {
+        var info = _npcInfo[npc.Id];
+        _npcs.Remove(npc.Id);
+        _npcInfo.Remove(npc.Id);
+        foreach (var s in _players.Values.Where(s => s.TargetId == npc.Id))
+        {
+            s.TargetId = 0;
+            s.LaserOn = false;
+        }
+        Broadcast(new EntityDestroyed { EntityId = npc.Id, KillerId = slot.Entity.Id }.Encode());
+        _respawns.Add((_tick + info.RespawnSeconds * 1000 / tickMs, info, npc.Id));
+
+        // recompensa: credits relativos + ledger (la api jamas toca esto en sesion)
+        var credits = (decimal)info.RewardCredits;
+        slot.Credits += credits;
+        var accountId = slot.Data.AccountId;
+        _ = Task.Run(() => Safe(() => repo.AddCredits(accountId, credits, "NPC_KILL", (long)npc.Id), "AddCredits"));
+        slot.Port.Send(HeroStatsDe(slot).Encode());
+
+        // la caja: el NPC pone la cantidad, la ZONA pone la mezcla (§4 guidelines)
+        var total = (uint)_rng.Next((int)info.CargoDropMin, (int)info.CargoDropMax + 1);
+        var pesoTotal = zoneBias.Sum(b => b.Weight);
+        var drops = new Dictionary<long, uint>();
+        uint repartido = 0;
+        foreach (var bias in zoneBias)
+        {
+            var unidades = (uint)Math.Round(total * bias.Weight / pesoTotal);
+            if (unidades > 0) { drops[bias.ItemId] = unidades; repartido += unidades; }
+        }
+        if (repartido == 0) return;
+        var caja = new BoxState
+        {
+            Id = _nextBoxId++, X = npc.X, Y = npc.Y, Drops = drops,
+            ExpiraTick = _tick + BoxTtlMs / tickMs,
+        };
+        _boxes[caja.Id] = caja;
+        Broadcast(new BoxSpawn
+        {
+            BoxId = caja.Id, BoxType = "from_ship",
+            X = (ulong)Math.Round(caja.X), Y = (ulong)Math.Round(caja.Y),
+        }.Encode());
+    }
+
+    // ─── recoleccion ────────────────────────────────────────────────────────
+
+    private void OnCollectBox(CollectBoxCmd collect)
+    {
+        var slot = SlotDe(collect.Port);
+        if (slot is null) return;
+        if (!_boxes.TryGetValue(collect.BoxId, out var caja))
+        {
+            slot.Port.Send(new ErrorReply { RequestId = collect.RequestId, Code = ErrorCode.Gone }.Encode());
+            return;
+        }
+        // la validacion que el legado dejaba al cliente, donde debe estar: aqui
+        var dist = Math.Sqrt(Math.Pow(caja.X - slot.Entity.X, 2) + Math.Pow(caja.Y - slot.Entity.Y, 2));
+        if (dist > CollectRange)
+        {
+            slot.Port.Send(new ErrorReply { RequestId = collect.RequestId, Code = ErrorCode.TooFar }.Encode());
+            return;
+        }
+        var espacio = slot.Data.CargoCapacity - slot.CargoUsed;
+        if (espacio == 0)
+        {
+            slot.Port.Send(new ErrorReply
+            {
+                RequestId = collect.RequestId, Code = ErrorCode.Insufficient, Detail = "bodega llena",
+            }.Encode());
+            return;
+        }
+
+        // toma lo que quepa; el resto queda en la caja hasta su expiracion
+        var tomados = new List<(long ItemId, uint Amount)>();
+        foreach (var (itemId, disponible) in caja.Drops.ToList())
+        {
+            if (espacio == 0) break;
+            var toma = Math.Min(disponible, espacio);
+            tomados.Add((itemId, toma));
+            espacio -= toma;
+            if (toma == disponible) caja.Drops.Remove(itemId);
+            else caja.Drops[itemId] = disponible - toma;
+        }
+
+        try
+        {
+            // sincrono a proposito: el CollectResult solo sale si la BD ya lo tiene
+            repo.AddCargoPickup(slot.Data.AccountId, tomados, (long)caja.Id);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "fallo AddCargoPickup cuenta {id}", slot.Data.AccountId);
+            slot.Port.Send(new ErrorReply { RequestId = collect.RequestId, Code = ErrorCode.Generic }.Encode());
+            return;
+        }
+        foreach (var (itemId, amount) in tomados)
+            slot.Cargo[itemId] = slot.Cargo.GetValueOrDefault(itemId) + amount;
+
+        var resultado = new CollectResult { RequestId = collect.RequestId };
+        foreach (var (itemId, amount) in tomados)
+            resultado.Drops.Add(new MaterialAmount { MaterialId = _lootIds[itemId], Amount = amount });
+        slot.Port.Send(resultado.Encode());
+        slot.Port.Send(HeroStatsDe(slot).Encode());
+
+        if (caja.Drops.Count == 0)
+        {
+            _boxes.Remove(caja.Id);
+            Broadcast(new BoxDespawn { BoxId = caja.Id, Reason = BoxDespawnReason.Collected }.Encode());
+        }
+    }
+
+    private PlayerSlot? SlotDe(IClientPort port) =>
+        _players.Values.FirstOrDefault(s => ReferenceEquals(s.Port, port));
+
+    private HeroStats HeroStatsDe(PlayerSlot slot) => new()
+    {
+        Hp = slot.Entity.Hp, MaxHp = slot.Entity.MaxHp,
+        Shield = slot.Entity.Shield, MaxShield = slot.Entity.MaxShield,
+        Cargo = slot.CargoUsed, MaxCargo = slot.Data.CargoCapacity,
+        Credits = (ulong)slot.Credits, Experience = 0, Level = 1,
+    };
 
     private void OnJoin(JoinCmd join)
     {
@@ -174,6 +409,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, 
         {
             Port = join.Port, Entity = hero, Data = join.Player,
             SessionId = join.SessionId, LastPingTick = _tick,
+            LaserDamage = join.LaserDamage, Cargo = join.Cargo,
+            Credits = join.Player.Credits,
         };
 
         // sincronizacion inicial: mapa -> heroe -> stats -> el resto del mundo
@@ -183,14 +420,15 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, Repo repo, 
             LimitsX = map.BoundsX, LimitsY = map.BoundsY, CargoRiskPct = 100,
         }.Encode());
         slot.Port.Send(hero.ToSpawn().Encode());
-        slot.Port.Send(new HeroStats
-        {
-            Hp = hero.Hp, MaxHp = hero.MaxHp, Shield = 0, MaxShield = 0,
-            Cargo = 0, MaxCargo = join.Player.CargoCapacity,
-            Credits = (ulong)join.Player.Credits, Experience = 0, Level = 1,
-        }.Encode());
+        slot.Port.Send(HeroStatsDe(slot).Encode());
         foreach (var otro in _players.Values) slot.Port.Send(otro.Entity.ToSpawn().Encode());
         foreach (var npc in _npcs.Values) slot.Port.Send(npc.ToSpawn().Encode());
+        foreach (var caja in _boxes.Values)
+            slot.Port.Send(new BoxSpawn
+            {
+                BoxId = caja.Id, BoxType = "from_ship",
+                X = (ulong)Math.Round(caja.X), Y = (ulong)Math.Round(caja.Y),
+            }.Encode());
 
         Broadcast(hero.ToSpawn().Encode());          // los demas ven llegar al heroe
         _players[join.Player.AccountId] = slot;

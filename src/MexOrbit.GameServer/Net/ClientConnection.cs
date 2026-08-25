@@ -60,6 +60,8 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                 return;
             }
             AccountId = accountId;
+            var laserDamage = repo.LoadLaserDamage(accountId);
+            var cargo = repo.LoadCargo(accountId);
             var (sessionId, reconnectToken) = repo.OpenSession(accountId);
 
             Send(new Welcome
@@ -69,7 +71,7 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                 ServerTimeMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 TickRate = 1000 / 80u,
             }.Encode());
-            world.Post(new JoinCmd(this, player, sessionId));
+            world.Post(new JoinCmd(this, player, sessionId, laserDamage, cargo));
 
             // ---- loop principal ----
             while (!_cts.IsCancellationRequested)
@@ -98,6 +100,12 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
             {
                 case MoveIntent.MsgId: world.Post(new MoveIntentCmd(this, MoveIntent.Decode(frame))); break;
                 case Pong.MsgId: world.Post(new PongCmd(this, Pong.Decode(frame).Nonce)); break;
+                case SelectTarget.MsgId: world.Post(new SelectTargetCmd(this, SelectTarget.Decode(frame).EntityId)); break;
+                case LaserToggle.MsgId: world.Post(new LaserToggleCmd(this, LaserToggle.Decode(frame).Active)); break;
+                case CollectBox.MsgId:
+                    var cb = CollectBox.Decode(frame);
+                    world.Post(new CollectBoxCmd(this, cb.RequestId, cb.BoxId));
+                    break;
                 case LogoutRequest.MsgId: world.Post(new LeaveCmd(this, "LOGOUT")); _cts.Cancel(); break;
                 default:
                     // mensaje desconocido o fuera de lugar: se ignora (jamas rompe la sesion)
