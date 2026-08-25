@@ -26,6 +26,10 @@ public sealed record LaserToggleCmd(IClientPort Port, bool Active) : WorldCmd;
 public sealed record CollectBoxCmd(IClientPort Port, ulong RequestId, ulong BoxId) : WorldCmd;
 public sealed record UnloadCargoCmd(IClientPort Port, ulong RequestId) : WorldCmd;
 public sealed record SellToNpcCmd(IClientPort Port, ulong RequestId, string MaterialId, ulong Amount) : WorldCmd;
+/// <summary>Reconexion dentro de la ventana de gracia: el puerto viejo se sustituye
+/// por el nuevo y la nave sigue donde estaba, sin recrearla.</summary>
+public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId) : WorldCmd;
+public sealed record ChatSendCmd(IClientPort Port, ulong RequestId, ChatChannel Channel, string Text) : WorldCmd;
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
     RefineRecipe? refineRecipe, List<NpcPrice> npcPrices,
@@ -37,6 +41,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     private const int AttackIntervalMs = 500;
     private const double CollectRange = 250;
     private const int BoxTtlMs = 150_000;      // §7 guidelines: despawn de caja 2-3 min
+    private const int GraceMs = 60_000;        // ventana de reconexion (auth-v1)
+    private const int ChatMaxLen = 256;
 
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
 
@@ -60,6 +66,9 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         public bool EnBase;                              // dentro del rango de la estacion
         public string AmmoId = "ammo_cel_1";             // municion equipada (E3 la hara elegible)
         public bool Skilled;                             // disparo potenciado (perfil de piloto, E4)
+        /// <summary>Tick en que expira la gracia; long.MaxValue = socket vivo.</summary>
+        public long GraceUntilTick = long.MaxValue;
+        public bool Desconectado => GraceUntilTick != long.MaxValue;
         public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
     }
 
@@ -190,15 +199,27 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             Broadcast(e.ToSpawn().Encode());
         }
 
+        // gracia agotada: la nave sale del mundo y la sesion se cierra
+        foreach (var slot in _players.Values.Where(s => s.Desconectado && _tick >= s.GraceUntilTick).ToList())
+        {
+            log.LogInformation("cuenta {id}: gracia agotada, saliendo del mundo", slot.Data.AccountId);
+            Drop(slot, "TIMEOUT");
+        }
+
         // heartbeat: ping con nonce; N sin respuesta = socket muerto
         var pingCadaTicks = pingIntervalSeconds * 1000 / tickMs;
         foreach (var slot in _players.Values.ToList())
         {
+            if (slot.Desconectado) continue;      // sin socket no hay a quien pingear
             if (_tick - slot.LastPingTick < pingCadaTicks) continue;
             if (slot.PingMisses >= pingMissesToDrop)
             {
-                log.LogInformation("cuenta {id}: {n} pings sin respuesta, cerrando", slot.Port.AccountId, slot.PingMisses);
-                Drop(slot, "TIMEOUT");
+                // socket mudo: se cierra y empieza la gracia (no se pierde la nave)
+                log.LogInformation("cuenta {id}: {n} pings sin respuesta, abriendo gracia",
+                    slot.Data.AccountId, slot.PingMisses);
+                slot.Port.CloseSocket();
+                slot.GraceUntilTick = _tick + GraceMs / tickMs;
+                slot.LaserOn = false;
                 continue;
             }
             slot.PingNonce = (ulong)_rng.NextInt64(1, long.MaxValue);
@@ -232,6 +253,56 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             case CollectBoxCmd collect: OnCollectBox(collect); break;
             case UnloadCargoCmd unload: OnUnloadCargo(unload); break;
             case SellToNpcCmd sell: OnSellToNpc(sell); break;
+            case ResumeCmd resume: OnResume(resume); break;
+            case ChatSendCmd chat: OnChatSend(chat); break;
+        }
+    }
+
+    // ─── reconexion y chat ──────────────────────────────────────────────────
+
+    /// <summary>El jugador vuelve dentro de la gracia: se le devuelve su nave donde
+    /// quedo, sin recrearla ni tocar su carga (auth-v1: resume de sesion).</summary>
+    private void OnResume(ResumeCmd cmd)
+    {
+        if (!_players.TryGetValue(cmd.AccountId, out var slot))
+        {
+            cmd.Port.Send(new ErrorReply { Code = ErrorCode.ResumeExpired }.Encode());
+            cmd.Port.CloseSocket();
+            return;
+        }
+        slot.Port = cmd.Port;                    // el socket nuevo toma el relevo
+        slot.GraceUntilTick = long.MaxValue;
+        slot.PingMisses = 0;
+        slot.LastPingTick = _tick;
+
+        cmd.Port.Send(new ResumeOk().Encode());
+        // re-sincronizacion completa: estado del mundo tal como esta ahora
+        SincronizarMundo(slot);
+        log.LogInformation("cuenta {id} reconecto dentro de la gracia", cmd.AccountId);
+    }
+
+    private void OnChatSend(ChatSendCmd cmd)
+    {
+        var slot = SlotDe(cmd.Port);
+        if (slot is null) return;
+        var texto = (cmd.Text ?? string.Empty).Trim();
+        if (texto.Length == 0) return;
+        if (texto.Length > ChatMaxLen) texto = texto[..ChatMaxLen];
+
+        var msg = new ChatMessage
+        {
+            Channel = cmd.Channel,
+            FromName = slot.Data.PilotName,
+            FromClan = "",
+            Text = texto,
+            ServerTimeMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        }.Encode();
+        // GLOBAL a todos; FACTION solo a los de la misma faccion (CLAN llega en E5)
+        foreach (var otro in _players.Values)
+        {
+            if (cmd.Channel == ChatChannel.Faction && otro.Data.Faction != slot.Data.Faction)
+                continue;
+            otro.Port.Send(msg);
         }
     }
 
@@ -560,14 +631,22 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             Credits = join.Player.Credits,
         };
 
-        // sincronizacion inicial: mapa -> heroe -> stats -> el resto del mundo
+        _players[join.Player.AccountId] = slot;
+        SincronizarMundo(slot);
+        Broadcast(hero.ToSpawn().Encode());          // los demas ven llegar al heroe
+        log.LogInformation("cuenta {id} ({nombre}) entro al mapa {code}",
+            join.Player.AccountId, join.Player.PilotName, map.Code);
+    }
+
+    /// <summary>Estado completo del mundo para un jugador: al entrar y al reconectar.</summary>
+    private void SincronizarMundo(PlayerSlot slot)
+    {
         slot.Port.Send(new EnterMap
         {
             MapId = (ulong)map.Id, MapCode = map.Code,
             LimitsX = map.BoundsX, LimitsY = map.BoundsY, CargoRiskPct = 100,
             StationX = map.StationX, StationY = map.StationY, StationRange = map.SecureRange,
         }.Encode());
-        // precios del NPC: el cliente ya puede mostrar la tienda de la base
         var precios = new NpcPrices();
         foreach (var p in npcPrices)
             precios.Prices.Add(new MaterialPrice
@@ -575,9 +654,11 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
                 MaterialId = p.LootId, PriceCredits = (ulong)p.PriceCredits,
             });
         slot.Port.Send(precios.Encode());
-        slot.Port.Send(hero.ToSpawn().Encode());
+        slot.Port.Send(slot.Entity.ToSpawn().Encode());
         slot.Port.Send(HeroStatsDe(slot).Encode());
-        foreach (var otro in _players.Values) slot.Port.Send(otro.Entity.ToSpawn().Encode());
+        foreach (var otro in _players.Values)
+            if (otro != slot)
+                slot.Port.Send(otro.Entity.ToSpawn().Encode());
         foreach (var npc in _npcs.Values) slot.Port.Send(npc.ToSpawn().Encode());
         foreach (var caja in _boxes.Values)
             slot.Port.Send(new BoxSpawn
@@ -585,19 +666,25 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
                 BoxId = caja.Id, BoxType = "from_ship",
                 X = (ulong)Math.Round(caja.X), Y = (ulong)Math.Round(caja.Y),
             }.Encode());
-
-        Broadcast(hero.ToSpawn().Encode());          // los demas ven llegar al heroe
-        _players[join.Player.AccountId] = slot;
         EnviarAlmacen(slot);
-        log.LogInformation("cuenta {id} ({nombre}) entro al mapa {code}",
-            join.Player.AccountId, join.Player.PilotName, map.Code);
     }
 
     private void OnLeave(LeaveCmd leave)
     {
         var slot = _players.Values.FirstOrDefault(s => ReferenceEquals(s.Port, leave.Port));
         if (slot is null) return;
-        Drop(slot, leave.Reason);
+        // LOGOUT explicito = se va de verdad; una caida de socket abre la ventana
+        // de gracia y la nave se queda en el mundo (auth-v1)
+        if (leave.Reason == "LOGOUT")
+        {
+            Drop(slot, leave.Reason);
+            return;
+        }
+        if (slot.Desconectado) return;
+        slot.GraceUntilTick = _tick + GraceMs / tickMs;
+        slot.LaserOn = false;
+        log.LogInformation("cuenta {id}: socket caido, {s} s de gracia para reconectar",
+            slot.Data.AccountId, GraceMs / 1000);
     }
 
     private void Drop(PlayerSlot slot, string reason)

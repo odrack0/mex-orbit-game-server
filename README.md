@@ -52,3 +52,35 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | Write-behind | `Game-World.cs (Tick)` | 30 s | Cadencia maxima de persistencia de player_ship_state |
 | Deambular de NPCs | `Game-World.cs (Tick)` | p=0.004 por tick, radio 800 | El wander perezoso |
 | Rango de la estacion | BD `map_station.secure_range` | 1500 | Dentro de este radio se puede descargar y vender (dato, no constante) |
+| `GraceMs` | `Game-World.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
+| `ChatMaxLen` | `Game-World.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
+
+## Reconexion y chat (I7)
+
+**Reconexion con ventana de gracia.** Una caida de socket **no** saca la nave del mundo:
+
+- `ClientConnection` postea `LeaveCmd(this, "DROPPED")` en su `finally`. Solo un
+  `LogoutRequest` explicito manda `"LOGOUT"`, y ese si hace `Drop`.
+- `OnLeave` con motivo distinto de `LOGOUT` marca `slot.GraceUntilTick = _tick + GraceMs/tickMs`
+  y apaga el laser. La nave sigue en el mundo, visible para los demas.
+- El heartbeat tambien abre gracia en vez de dropear: 3 pings sin Pong cierran el
+  socket y arrancan la cuenta atras.
+- El tick barre los slots con la gracia agotada y los dropea con motivo `TIMEOUT`.
+- Mientras dura la gracia, la sesion **sigue abierta en BD**: por eso el token de
+  reconexion todavia resuelve.
+
+**El regreso.** El primer frame de una conexion puede ser `Hello` **o** `Resume`:
+
+- `Resume` trae el `reconnect_token` que se entrego en el `Welcome`.
+  `Repo.FindSessionByToken` busca la sesion viva por hash del token (nunca se
+  guarda el token en claro). Si no existe: `ErrorReply { RESUME_EXPIRED }`.
+- `OnResume` **intercambia el puerto** del slot (`slot.Port = cmd.Port`), cierra la
+  gracia, responde `ResumeOk` y llama a `SincronizarMundo(slot)` — el mismo metodo
+  que usa el join, asi que el cliente recibe `EnterMap` + spawns + estado completo.
+- La nave, su carga y su posicion no se tocan: es el mismo slot, no uno nuevo.
+
+**Chat.** Viaja **tipado por el mismo socket del juego** (el legado tenia un socket
+aparte y una gramatica de texto con separadores sin escapar). `OnChatSend` recorta a
+`ChatMaxLen`, descarta el vacio y reparte: `GLOBAL` a todos, `FACTION` solo a los de
+la misma faccion. `CLAN` llega en E5. El eco vuelve tambien al emisor: el cliente
+nunca pinta un mensaje que el server no confirmo.

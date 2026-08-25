@@ -27,12 +27,33 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
         var envio = Task.Run(SendLoopAsync);
         try
         {
-            // ---- handshake: el primer frame DEBE ser Hello valido ----
+            // ---- handshake: el primer frame es Hello (entrar) o Resume (volver) ----
             var primero = await ReceiveFrameAsync();
             if (primero is null) return;
+
+            if (LeerMsgId(primero) == Resume.MsgId)
+            {
+                var resume = Resume.Decode(primero);
+                if (resume.ProtocolVersion != (ulong)protocolVersion)
+                {
+                    Send(new ErrorReply { Code = ErrorCode.VersionUnsupported }.Encode());
+                    return;
+                }
+                var sesion = repo.FindSessionByToken(resume.ReconnectToken);
+                if (sesion is null)
+                {
+                    Send(new ErrorReply { Code = ErrorCode.ResumeExpired }.Encode());
+                    return;
+                }
+                AccountId = sesion.Value.AccountId;
+                world.Post(new ResumeCmd(this, sesion.Value.AccountId, sesion.Value.SessionId));
+                await LoopAsync();
+                return;
+            }
+
             if (LeerMsgId(primero) != Hello.MsgId)
             {
-                Send(new ErrorReply { Code = ErrorCode.Invalid, Detail = "se esperaba Hello" }.Encode());
+                Send(new ErrorReply { Code = ErrorCode.Invalid, Detail = "se esperaba Hello o Resume" }.Encode());
                 return;
             }
             Hello hello;
@@ -72,23 +93,28 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                 TickRate = 1000 / 80u,
             }.Encode());
             world.Post(new JoinCmd(this, player, sessionId, laserDamage, cargo));
-
-            // ---- loop principal ----
-            while (!_cts.IsCancellationRequested)
-            {
-                var frame = await ReceiveFrameAsync();
-                if (frame is null) break;
-                Dispatch(frame);
-            }
+            await LoopAsync();
         }
         catch (OperationCanceledException) { /* cierre pedido por el mundo */ }
         catch (WebSocketException) { /* socket caido: el mundo hara el drop */ }
         finally
         {
-            world.Post(new LeaveCmd(this, "LOGOUT"));
+            // DROPPED (no LOGOUT): una caida abre la ventana de gracia; solo el
+            // LogoutRequest explicito saca la nave del mundo
+            world.Post(new LeaveCmd(this, "DROPPED"));
             _outbox.Writer.TryComplete();
             try { await envio; } catch { /* ya cerrando */ }
             socket.Dispose();
+        }
+    }
+
+    private async Task LoopAsync()
+    {
+        while (!_cts.IsCancellationRequested)
+        {
+            var frame = await ReceiveFrameAsync();
+            if (frame is null) break;
+            Dispatch(frame);
         }
     }
 
@@ -112,6 +138,10 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                 case SellToNpc.MsgId:
                     var sn = SellToNpc.Decode(frame);
                     world.Post(new SellToNpcCmd(this, sn.RequestId, sn.MaterialId, sn.Amount));
+                    break;
+                case ChatSend.MsgId:
+                    var cs = ChatSend.Decode(frame);
+                    world.Post(new ChatSendCmd(this, cs.RequestId, cs.Channel, cs.Text));
                     break;
                 case LogoutRequest.MsgId: world.Post(new LeaveCmd(this, "LOGOUT")); _cts.Cancel(); break;
                 default:

@@ -93,6 +93,19 @@ public sealed class Repo(string connectionString)
         return (id, token);
     }
 
+    /// <summary>Busca la sesion viva dueña de un reconnect token (para el resume).</summary>
+    public (long SessionId, long AccountId)? FindSessionByToken(string token)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token)))
+            .ToLowerInvariant();
+        using var db = Open();
+        return db.QuerySingleOrDefault<(long SessionId, long AccountId)?>(
+            @"SELECT CAST(id AS SIGNED) AS SessionId, CAST(account_id AS SIGNED) AS AccountId
+              FROM game_session
+              WHERE reconnect_token_hash = @hash AND closed_at IS NULL
+              LIMIT 1", new { hash });
+    }
+
     public void CloseSession(long sessionId, string reason)
     {
         using var db = Open();
