@@ -82,6 +82,7 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
             }
             AccountId = accountId;
             var laserDamage = repo.LoadLaserDamage(accountId);
+            var maxShield = repo.LoadShieldCapacity(accountId);
             var cargo = repo.LoadCargo(accountId);
             var (sessionId, reconnectToken) = repo.OpenSession(accountId);
 
@@ -92,7 +93,7 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                 ServerTimeMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 TickRate = 1000 / 80u,
             }.Encode());
-            world.Post(new JoinCmd(this, player, sessionId, laserDamage, cargo));
+            world.Post(new JoinCmd(this, player, sessionId, laserDamage, maxShield, cargo));
             await LoopAsync();
         }
         catch (OperationCanceledException) { /* cierre pedido por el mundo */ }

@@ -17,7 +17,7 @@ public interface IClientPort
 
 public abstract record WorldCmd;
 public sealed record JoinCmd(IClientPort Port, PlayerData Player, long SessionId, uint LaserDamage,
-    Dictionary<long, uint> Cargo) : WorldCmd;
+    uint MaxShield, Dictionary<long, uint> Cargo) : WorldCmd;
 public sealed record LeaveCmd(IClientPort Port, string Reason) : WorldCmd;
 public sealed record MoveIntentCmd(IClientPort Port, MoveIntent Intent) : WorldCmd;
 public sealed record PongCmd(IClientPort Port, ulong Nonce) : WorldCmd;
@@ -232,9 +232,9 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         if (_tick % (30_000 / tickMs) == 0)
             foreach (var slot in _players.Values)
             {
-                var (id, mapId, x, y, hp) = (slot.Data.AccountId, map.Id,
-                    (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp);
-                _ = Task.Run(() => Safe(() => repo.SaveShipState(id, mapId, x, y, hp), "SaveShipState"));
+                var (id, mapId, x, y, hp, esc) = (slot.Data.AccountId, map.Id,
+                    (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield);
+                _ = Task.Run(() => Safe(() => repo.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
                 var sid = slot.SessionId;
                 _ = Task.Run(() => Safe(() => repo.TouchSession(sid), "TouchSession"));
             }
@@ -617,6 +617,12 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             Speed = join.Player.BaseSpeed,
             Hp = join.Player.CurrentHp,
             MaxHp = join.Player.BaseHp,
+            // el escudo del casco + sus generadores. En E2 se entra con el escudo
+            // LLENO (salir de la base lo recarga): la regeneracion en vuelo aun no
+            // existe, y arrastrar un 0 guardado dejaria al jugador sin escudo para
+            // siempre. Se persiste igual, para cuando la regeneracion llegue.
+            Shield = join.MaxShield,
+            MaxShield = join.MaxShield,
             X = join.Player.PosX,
             Y = join.Player.PosY,
         };
@@ -692,11 +698,11 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         _players.Remove(slot.Data.AccountId);
         Despawn(slot.Entity.Id, DespawnReason.Left);
         slot.Port.CloseSocket();
-        var (id, mapId, x, y, hp, sid) = (slot.Data.AccountId, map.Id,
-            (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.SessionId);
+        var (id, mapId, x, y, hp, esc, sid) = (slot.Data.AccountId, map.Id,
+            (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield, slot.SessionId);
         _ = Task.Run(() => Safe(() =>
         {
-            repo.SaveShipState(id, mapId, x, y, hp);   // el estado siempre se persiste al salir
+            repo.SaveShipState(id, mapId, x, y, hp, esc);   // el estado siempre se persiste al salir
             repo.CloseSession(sid, reason);
         }, "Drop"));
         log.LogInformation("cuenta {id} salio ({reason})", id, reason);

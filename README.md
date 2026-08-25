@@ -55,6 +55,22 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `GraceMs` | `Game-World.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
 | `ChatMaxLen` | `Game-World.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
 
+## El escudo del jugador
+
+**v1 no tiene nano-casco**: las stats defensivas son dos, casco y escudo, y viajan
+**por separado** (`EntitySpawn.hp_pct` + `shield_pct`, `HeroStats`, `TargetInfo`,
+`AttackEvent`). El cliente nunca recibe la suma: cada barra se lee contra su maximo.
+
+La **capacidad de escudo** no esta en el casco: la Phoenix trae `base_shield = 0` y
+todo su escudo sale de los **generadores equipados** (`NAN-1` = 1000). `LoadShieldCapacity`
+la calcula como `ship_catalog.base_shield + SUM(server_item_stat 'shield')` de los
+slots `GENERATOR` de la config activa — el mismo patron que `LoadLaserDamage`.
+
+**En E2 se entra con el escudo lleno.** La regeneracion en vuelo todavia no existe;
+arrastrar un `current_shield` guardado en 0 dejaria al jugador sin escudo para
+siempre. `current_shield` se persiste igual (write-behind y al salir), para que el
+dato ya este cuando la regeneracion llegue y solo haya que dejar de sobrescribirlo.
+
 ## Reconexion y chat (I7)
 
 **Reconexion con ventana de gracia.** Una caida de socket **no** saca la nave del mundo:

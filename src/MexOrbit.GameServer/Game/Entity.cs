@@ -48,6 +48,8 @@ public sealed class Entity
         Y = (ulong)Math.Round(Y),
         HpPct = MaxHp == 0 ? 1f : (float)Hp / MaxHp,
         Speed = Speed,
+        // casco y escudo viajan por separado: son dos barras, no una suma
+        ShieldPct = MaxShield == 0 ? 0f : (float)Shield / MaxShield,
     };
 
     public EntityMove ToMove(bool teleport = false) => new()

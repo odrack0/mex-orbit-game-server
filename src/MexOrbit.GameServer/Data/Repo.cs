@@ -28,8 +28,8 @@ public sealed record NpcSpawnInfo(long CatalogId, string Code, string DisplayNam
     uint RewardExperience, uint RewardHonor, uint RewardCredits, uint CargoDropMin, uint CargoDropMax);
 
 public sealed record PlayerData(long AccountId, string PilotName, byte Faction, string ShipCode,
-    uint BaseHp, ushort BaseSpeed, uint CargoCapacity, uint CurrentHp, uint PosX, uint PosY,
-    decimal Credits);
+    uint BaseHp, ushort BaseSpeed, uint CargoCapacity, uint CurrentHp, uint CurrentShield,
+    uint PosX, uint PosY, decimal Credits);
 
 public sealed class Repo(string connectionString)
 {
@@ -66,7 +66,8 @@ public sealed class Repo(string connectionString)
             @"SELECT CAST(a.id AS SIGNED) AS AccountId, a.pilot_name AS PilotName, a.faction_id AS Faction,
                      c.code AS ShipCode, c.base_hp AS BaseHp, c.base_speed AS BaseSpeed,
                      c.cargo_capacity AS CargoCapacity,
-                     st.current_hp AS CurrentHp, st.pos_x AS PosX, st.pos_y AS PosY,
+                     st.current_hp AS CurrentHp, st.current_shield AS CurrentShield,
+                     st.pos_x AS PosX, st.pos_y AS PosY,
                      CAST(COALESCE(rb.amount, 0) AS DECIMAL(20,6)) AS Credits
               FROM account a
               JOIN player_ship ps ON ps.account_id = a.id AND ps.is_active = 1
@@ -141,6 +142,26 @@ public sealed class Repo(string connectionString)
               JOIN server_item_stat st ON st.server_item_id = pi.server_item_id
               JOIN server_item_stat_type t ON t.id = st.stat_type_id AND t.code = 'damage'
               WHERE pes.account_id = @accountId AND pes.ship_config = 1 AND pes.slot_kind = 'LASER'",
+            new { accountId });
+    }
+
+    /// <summary>Capacidad de escudo: el base del casco mas lo que aporten los
+    /// generadores equipados en la config activa (la Phoenix trae 0 de base: todo
+    /// su escudo sale del NAN-1).</summary>
+    public uint LoadShieldCapacity(long accountId)
+    {
+        using var db = Open();
+        return (uint)db.ExecuteScalar<decimal>(
+            @"SELECT (SELECT c.base_shield
+                      FROM player_ship ps JOIN ship_catalog c ON c.id = ps.ship_catalog_id
+                      WHERE ps.account_id = @accountId AND ps.is_active = 1)
+                   + COALESCE((SELECT SUM(st.value)
+                               FROM player_equipment_slot pes
+                               JOIN player_item pi ON pi.id = pes.player_item_id
+                               JOIN server_item_stat st ON st.server_item_id = pi.server_item_id
+                               JOIN server_item_stat_type t ON t.id = st.stat_type_id AND t.code = 'shield'
+                               WHERE pes.account_id = @accountId AND pes.ship_config = 1
+                                 AND pes.slot_kind = 'GENERATOR'), 0)",
             new { accountId });
     }
 
@@ -356,12 +377,12 @@ public sealed class Repo(string connectionString)
     }
 
     /// <summary>Write-behind del estado en vivo: la UNICA escritura caliente (esquema-v1 §5).</summary>
-    public void SaveShipState(long accountId, long mapId, uint x, uint y, uint hp)
+    public void SaveShipState(long accountId, long mapId, uint x, uint y, uint hp, uint shield)
     {
         using var db = Open();
         db.Execute(
             @"UPDATE player_ship_state
-              SET map_id = @mapId, pos_x = @x, pos_y = @y, current_hp = @hp
-              WHERE account_id = @accountId", new { accountId, mapId, x, y, hp });
+              SET map_id = @mapId, pos_x = @x, pos_y = @y, current_hp = @hp, current_shield = @shield
+              WHERE account_id = @accountId", new { accountId, mapId, x, y, hp, shield });
     }
 }
