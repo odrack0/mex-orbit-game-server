@@ -133,6 +133,9 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         // NPCs: deambular perezoso dentro del mapa
         foreach (var npc in _npcs.Values)
         {
+            // bajo fuego reciente el NPC no deambula: se queda a pelear (bueno
+            // para el juego y para que el combate no se escape del rango)
+            if (_tick - npc.LastHitTick < 3000 / tickMs) continue;
             if (!npc.Moving && _rng.NextDouble() < 0.004)
             {
                 npc.TargetX = Math.Clamp(npc.X + _rng.Next(-800, 801), 0, map.BoundsX);
@@ -248,6 +251,14 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         npc.Shield -= alEscudo;
         var alCasco = Math.Min(npc.Hp, danio - alEscudo);
         npc.Hp -= alCasco;
+        npc.LastHitTick = _tick;
+        // el golpe lo frena en seco donde este (y avisa a todos)
+        if (npc.Moving)
+        {
+            npc.TargetX = npc.X;
+            npc.TargetY = npc.Y;
+            Broadcast(npc.ToMove().Encode());
+        }
         Broadcast(new AttackEvent
         {
             AttackerId = slot.Entity.Id, TargetId = npc.Id, Weapon = Weapon.Laser,

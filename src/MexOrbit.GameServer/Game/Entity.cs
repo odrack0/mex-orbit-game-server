@@ -20,6 +20,7 @@ public sealed class Entity
     public uint MaxHp { get; init; }
     public uint Shield { get; set; }
     public uint MaxShield { get; init; }
+    public long LastHitTick { get; set; } = long.MinValue;
 
     public bool Moving => Math.Abs(X - TargetX) > 0.5 || Math.Abs(Y - TargetY) > 0.5;
 
