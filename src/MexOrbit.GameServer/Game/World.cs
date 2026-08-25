@@ -58,6 +58,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         public long NextAttackTick;
         public decimal Credits;
         public bool EnBase;                              // dentro del rango de la estacion
+        public string AmmoId = "ammo_cel_1";             // municion equipada (E3 la hara elegible)
+        public bool Skilled;                             // disparo potenciado (perfil de piloto, E4)
         public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
     }
 
@@ -393,6 +395,10 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         {
             AttackerId = slot.Entity.Id, TargetId = npc.Id, Weapon = Weapon.Laser,
             Damage = danio, TargetHp = npc.Hp, TargetShield = npc.Shield, Missed = false,
+            // el aspecto del disparo: la municion equipada y si va potenciada.
+            // En el slice hay una sola municion y el perfil de piloto llega en E4,
+            // asi que van fijos; el contrato ya los transporta.
+            AmmoId = slot.AmmoId, Skilled = slot.Skilled,
         }.Encode());
         if (npc.Hp == 0) OnNpcMuerto(slot, npc);
     }
