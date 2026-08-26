@@ -34,7 +34,8 @@ public sealed record RespawnSelectCmd(IClientPort Port, ulong OptionId) : WorldC
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
     RefineRecipe? refineRecipe, List<NpcPrice> npcPrices, List<PortalInfo> portals,
-    Repo repo, ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop)
+    Repo repo, ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop,
+    bool npcCombatEnabled = true)
 {
     // Diales de combate y loot del slice (documentados en el README del repo).
     // Los numeros de JUEGO (recompensas, drops) viven en BD; esto es cadencia/alcance.
@@ -120,7 +121,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         foreach (var spawn in npcSpawns)
             for (var i = 0; i < spawn.Amount; i++)
                 SpawnNpc(spawn, nextId++);
-        log.LogInformation("Mapa {code}: {n} NPCs poblados", map.Code, _npcs.Count);
+        log.LogInformation("Mapa {code}: {n} NPCs poblados · combate NPC->jugador {estado}",
+            map.Code, _npcs.Count, npcCombatEnabled ? "ENCENDIDO" : "APAGADO");
     }
 
     private Entity SpawnNpc(NpcSpawnInfo spawn, ulong id)
@@ -290,6 +292,10 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             }
         }
 
+        // dial `npc_combat_enabled`: apagado, los bichos siguen vagabundeando,
+        // fichandote y persiguiendote — y el Vorax sigue huyendo malherido.
+        // Lo unico que no ocurre es el daño.
+        if (!npcCombatEnabled) return;
         if (!ai.Atacando || _tick < ai.ProximoDisparoTick) return;
         var presa = PresaDe(ai);
         if (presa is null) { ai.Olvidar(); return; }

@@ -25,8 +25,10 @@ var bias = repo.LoadZoneBias(mapa.ZoneTier);
 var receta = repo.LoadRefineRecipe();
 var precios = repo.LoadNpcPrices();
 var portales = repo.LoadPortals(mapa.Id);
+// dial de JUEGO, no de despliegue: vive en server_setting con su auditoria
+var npcCombat = repo.LoadBoolSetting("npc_combat_enabled", true);
 var world = new World(mapa, spawns, bias, receta, precios, portales, repo, log.CreateLogger<World>(),
-    tickMs, pingInterval, pingMisses);
+    tickMs, pingInterval, pingMisses, npcCombat);
 world.SpawnNpcs();
 
 var verifier = new TicketVerifier(pubKeyPath);

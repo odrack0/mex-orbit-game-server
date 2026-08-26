@@ -61,6 +61,17 @@ public sealed class Repo(string connectionString)
               WHERE p.map_id = @mapId AND p.is_visible = 1", new { mapId }).ToList();
     }
 
+    /// <summary>Escalar booleano de `server_setting`. Si la fila no existe se usa
+    /// el valor por defecto: un dial ausente jamas debe tumbar el arranque.</summary>
+    public bool LoadBoolSetting(string key, bool porDefecto)
+    {
+        using var db = Open();
+        var v = db.ExecuteScalar<string?>(
+            "SELECT value FROM server_setting WHERE setting_key = @key", new { key });
+        if (v is null) return porDefecto;
+        return v is "1" or "true" or "TRUE" or "True";
+    }
+
     public List<NpcSpawnInfo> LoadNpcSpawns(long mapId)
     {
         using var db = Open();

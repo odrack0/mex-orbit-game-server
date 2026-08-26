@@ -63,6 +63,7 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | Aggro y agresividad | BD `npc_catalog.aggro_radius` / `is_aggressive` | 500-700 · solo el Ferox | Datos, no constantes: el radio y si caza son del catalogo |
 | Daño del NPC | BD `npc_catalog.damage` | 25-85 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
 | Huida | BD `npc_catalog.flee_hp_pct` | 30 solo en el Vorax | Debajo de ese % de casco, el bicho se larga |
+| Combate NPC->jugador | BD `server_setting.npc_combat_enabled` | **0 (apagado)** | Apagado, los NPC persiguen pero no disparan |
 | `HuidaMs` / `HuidaDistancia` | `Game-World.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
 
 ## La IA de los NPCs
@@ -76,6 +77,13 @@ tres estados**, un pensamiento por segundo:
 2. **VolandoAlEnemigo** — se coloca en un punto aleatorio del **circulo** de radio 300
    alrededor del jugador, no encima de el: asi rodean en vez de amontonarse en un pixel.
 3. **EsperandoQueSeMueva** — aguanta ahi; si el jugador se mueve, vuelve a aproximarse.
+
+**El combate NPC→jugador tiene interruptor.** `server_setting.npc_combat_enabled` (hoy en **0**)
+apaga solo el disparo: los bichos siguen vagabundeando, fichandote, persiguiendote, y el Vorax
+sigue huyendo malherido. Lo unico que no ocurre es el daño. Esta en BD y no en `appsettings.json`
+porque es una decision de JUEGO, no de despliegue — y asi queda asentado en
+`server_setting_audit` quien lo movio. Se lee al arrancar: cambiarlo pide reiniciar el server,
+que lo anuncia en su log de arranque.
 
 **Los cobardes huyen.** `npc_catalog.flee_hp_pct` (0 = jamas huye) manda al NPC a correr
 en direccion contraria a quien le pega cuando su casco baja de ese porcentaje: suelta la presa,
