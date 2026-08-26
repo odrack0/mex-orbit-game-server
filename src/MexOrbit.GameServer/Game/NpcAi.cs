@@ -31,6 +31,9 @@ public enum NpcAiState
     VolandoAlEnemigo,
     /// <summary>Ya esta al lado: aguanta hasta que la presa se mueva.</summary>
     EsperandoQueSeMueva,
+    /// <summary>Malherido: corre lejos y deja de disparar. Solo lo usan los
+    /// bichos con `flee_hp_pct` &gt; 0 — el Vorax es el primero.</summary>
+    Huyendo,
 }
 
 public sealed class NpcAi
@@ -42,6 +45,8 @@ public sealed class NpcAi
     public bool Atacando;
     public long ProximoPensamientoTick;
     public long ProximoDisparoTick;
+    /// <summary>Tick hasta el que sigue corriendo sin replantearse nada.</summary>
+    public long HuyendoHastaTick;
 
     public void Olvidar()
     {
@@ -51,9 +56,10 @@ public sealed class NpcAi
     }
 
     /// <summary>El ReceiveAttack del legado: quien te pega se vuelve tu objetivo,
-    /// seas agresivo o no.</summary>
+    /// seas agresivo o no. Un cobarde en plena huida no se da la vuelta a pelear.</summary>
     public void Devolver(ulong atacanteId)
     {
+        if (Estado == NpcAiState.Huyendo) return;
         TargetId = atacanteId;
         Atacando = true;
         Estado = NpcAiState.VolandoAlEnemigo;

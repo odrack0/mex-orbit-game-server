@@ -52,6 +52,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     private const double DesaggroFactor = 1.8;   // se rinde a este multiplo de su aggro
     private const int NpcShieldRegenMs = 1000;   // 10% del maximo por segundo...
     private const int NpcOutOfCombatMs = 10_000; // ...tras 10 s sin recibir fuego
+    private const int HuidaMs = 12_000;          // cuanto corre un cobarde antes de recomponerse
+    private const double HuidaDistancia = 2500;  // a que distancia se larga
 
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
 
@@ -274,6 +276,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         var info = _npcInfo[npc.Id];
 
         RegenerarEscudo(npc, info);
+        ComprobarHuida(npc, info, ai);
 
         if (_tick >= ai.ProximoPensamientoTick)
         {
@@ -283,6 +286,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
                 case NpcAiState.Buscando: Buscar(npc, info, ai); break;
                 case NpcAiState.VolandoAlEnemigo: Aproximarse(npc, info, ai); break;
                 case NpcAiState.EsperandoQueSeMueva: EsperarMovimiento(npc, info, ai); break;
+                case NpcAiState.Huyendo: Huir(npc, ai); break;
             }
         }
 
@@ -340,6 +344,39 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             return;
         }
         if (presa.Entity.Moving) ai.Estado = NpcAiState.VolandoAlEnemigo;
+    }
+
+
+    /// <summary>Los cobardes (`flee_hp_pct` &gt; 0) sueltan la presa y corren en cuanto
+    /// el casco baja del umbral. El Vorax es el primero: te cuesta una fortuna
+    /// bajarlo y, si te descuidas, se larga con el escudo regenerandose.</summary>
+    private void ComprobarHuida(Entity npc, NpcSpawnInfo info, NpcAi ai)
+    {
+        if (info.FleeHpPct == 0 || ai.Estado == NpcAiState.Huyendo) return;
+        if (npc.MaxHp == 0 || npc.Hp * 100 / npc.MaxHp >= info.FleeHpPct) return;
+
+        // se aleja EN DIRECCION CONTRARIA a quien le estaba pegando
+        var presa = PresaDe(ai);
+        var dx = presa is null ? _rng.NextDouble() * 2 - 1 : npc.X - presa.Entity.X;
+        var dy = presa is null ? _rng.NextDouble() * 2 - 1 : npc.Y - presa.Entity.Y;
+        var largo = Math.Sqrt(dx * dx + dy * dy);
+        if (largo < 1) { dx = 1; dy = 0; largo = 1; }
+        npc.TargetX = Math.Clamp(npc.X + dx / largo * HuidaDistancia, 0, map.BoundsX);
+        npc.TargetY = Math.Clamp(npc.Y + dy / largo * HuidaDistancia, 0, map.BoundsY);
+        Broadcast(npc.ToMove().Encode());
+
+        ai.TargetId = 0;
+        ai.Atacando = false;
+        ai.Estado = NpcAiState.Huyendo;
+        ai.HuyendoHastaTick = _tick + HuidaMs / tickMs;
+    }
+
+    /// <summary>Mientras huye no piensa en nada mas. Cuando se le pasa el susto
+    /// vuelve a buscar — con el escudo ya recompuesto si le dieron tregua.</summary>
+    private void Huir(Entity npc, NpcAi ai)
+    {
+        if (_tick < ai.HuyendoHastaTick) return;
+        ai.Olvidar();
     }
 
     /// <summary>Escudo del NPC: 10% del maximo por segundo, tras 10 s sin recibir

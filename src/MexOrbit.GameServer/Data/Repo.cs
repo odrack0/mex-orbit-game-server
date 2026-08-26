@@ -26,7 +26,7 @@ public sealed record NpcPrice(long ItemId, string LootId, decimal PriceCredits);
 public sealed record UnloadOutcome(Dictionary<long, uint> Stored, Dictionary<long, uint> Refined);
 
 public sealed record NpcSpawnInfo(long CatalogId, string Code, string DisplayName, uint MaxHp, uint MaxShield,
-    ushort Speed, uint Damage, bool IsAggressive, uint AggroRadius, uint RespawnSeconds, ushort Amount,
+    ushort Speed, uint Damage, bool IsAggressive, byte FleeHpPct, uint AggroRadius, uint RespawnSeconds, ushort Amount,
     uint RewardExperience, uint RewardHonor, uint RewardCredits, uint CargoDropMin, uint CargoDropMax);
 
 public sealed record PlayerData(long AccountId, string PilotName, byte Faction, string ShipCode,
@@ -67,7 +67,8 @@ public sealed class Repo(string connectionString)
         return db.Query<NpcSpawnInfo>(
             @"SELECT CAST(n.id AS SIGNED) AS CatalogId, n.code, n.display_name AS DisplayName, n.max_hp AS MaxHp,
                      n.max_shield AS MaxShield, n.speed, n.damage,
-                     n.is_aggressive AS IsAggressive, n.aggro_radius AS AggroRadius,
+                     n.is_aggressive AS IsAggressive, n.flee_hp_pct AS FleeHpPct,
+                     n.aggro_radius AS AggroRadius,
                      n.respawn_seconds AS RespawnSeconds, s.amount,
                      n.reward_experience AS RewardExperience, n.reward_honor AS RewardHonor,
                      n.reward_credits AS RewardCredits, n.cargo_drop_min AS CargoDropMin, n.cargo_drop_max AS CargoDropMax

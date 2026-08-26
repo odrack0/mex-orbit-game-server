@@ -61,7 +61,9 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `DesaggroFactor` | `Game-World.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
 | `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Game-World.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
 | Aggro y agresividad | BD `npc_catalog.aggro_radius` / `is_aggressive` | 500-700 · solo el Ferox | Datos, no constantes: el radio y si caza son del catalogo |
-| Daño del NPC | BD `npc_catalog.damage` | 25-75 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
+| Daño del NPC | BD `npc_catalog.damage` | 25-85 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
+| Huida | BD `npc_catalog.flee_hp_pct` | 30 solo en el Vorax | Debajo de ese % de casco, el bicho se larga |
+| `HuidaMs` / `HuidaDistancia` | `Game-World.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
 
 ## La IA de los NPCs
 
@@ -74,6 +76,12 @@ tres estados**, un pensamiento por segundo:
 2. **VolandoAlEnemigo** — se coloca en un punto aleatorio del **circulo** de radio 300
    alrededor del jugador, no encima de el: asi rodean en vez de amontonarse en un pixel.
 3. **EsperandoQueSeMueva** — aguanta ahi; si el jugador se mueve, vuelve a aproximarse.
+
+**Los cobardes huyen.** `npc_catalog.flee_hp_pct` (0 = jamas huye) manda al NPC a correr
+en direccion contraria a quien le pega cuando su casco baja de ese porcentaje: suelta la presa,
+deja de disparar y no se da la vuelta ni aunque le sigas pegando. El **Vorax** es el primero
+(30%). Es un dial de BD, no un `if` por especie en el codigo: cualquier bicho futuro puede ser
+cobarde sin tocar el server.
 
 **Pasivo no es inofensivo.** Recibir un golpe convierte a cualquier NPC en agresor (el
 `ReceiveAttack` del legado), sea o no `is_aggressive`. En el 1-1 solo el **Ferox** caza por
