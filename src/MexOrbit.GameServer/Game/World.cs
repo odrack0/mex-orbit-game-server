@@ -28,7 +28,8 @@ public sealed record UnloadCargoCmd(IClientPort Port, ulong RequestId) : WorldCm
 public sealed record SellToNpcCmd(IClientPort Port, ulong RequestId, string MaterialId, ulong Amount) : WorldCmd;
 /// <summary>Reconexion dentro de la ventana de gracia: el puerto viejo se sustituye
 /// por el nuevo y la nave sigue donde estaba, sin recrearla.</summary>
-public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId) : WorldCmd;
+public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId,
+    PlayerData? Player, uint LaserDamage, uint MaxShield, Dictionary<long, uint>? Cargo) : WorldCmd;
 public sealed record ChatSendCmd(IClientPort Port, ulong RequestId, ChatChannel Channel, string Text) : WorldCmd;
 public sealed record RespawnSelectCmd(IClientPort Port, ulong OptionId) : WorldCmd;
 public sealed record JumpCmd(IClientPort Port, ulong RequestId, ulong PortalId) : WorldCmd;
@@ -517,12 +518,31 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
 
     /// <summary>El jugador vuelve dentro de la gracia: se le devuelve su nave donde
     /// quedo, sin recrearla ni tocar su carga (auth-v1: resume de sesion).</summary>
+    /// <summary>Volver. Hay DOS formas de volver y las dos entran por aqui:
+    ///
+    ///   · Se cayo el socket y la nave sigue en este mapa, dentro de la ventana de
+    ///     gracia. El slot existe: el socket nuevo toma el relevo.
+    ///   · Se llega de OTRO mapa (o de otro servidor) tras un salto. Aqui nadie ha
+    ///     visto nunca a este jugador, y eso NO es un error: es exactamente lo que
+    ///     pasa al cruzar un portal. Se entra de cero, con lo que diga la BD — que
+    ///     ya dice el mapa y la posicion, porque el origen los persistio antes de
+    ///     soltarlo.
+    ///
+    /// Antes solo existia el primer caso y el segundo respondia RESUME_EXPIRED, asi
+    /// que el salto llegaba al server, persistia... y dejaba al jugador fuera.</summary>
     private void OnResume(ResumeCmd cmd)
     {
         if (!_players.TryGetValue(cmd.AccountId, out var slot))
         {
-            cmd.Port.Send(new ErrorReply { Code = ErrorCode.ResumeExpired }.Encode());
-            cmd.Port.CloseSocket();
+            if (cmd.Player is null)
+            {
+                cmd.Port.Send(new ErrorReply { Code = ErrorCode.ResumeExpired }.Encode());
+                cmd.Port.CloseSocket();
+                return;
+            }
+            cmd.Port.Send(new ResumeOk().Encode());
+            OnJoin(new JoinCmd(cmd.Port, cmd.Player, cmd.SessionId, cmd.LaserDamage,
+                cmd.MaxShield, cmd.Cargo ?? new Dictionary<long, uint>()));
             return;
         }
         slot.Port = cmd.Port;                    // el socket nuevo toma el relevo
@@ -988,25 +1008,37 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     /// <summary>Lo levanta el Universo: (mundo de origen, cuenta, portal usado).</summary>
     internal event Action<World, long, PortalInfo>? Saltar;
 
-    /// <summary>Saca al jugador SIN persistir una salida: no se ha ido del juego, se
-    /// esta mudando de mapa. Devuelve su estado para que el mapa destino lo reciba
-    /// entero — bodega, creditos y danio del laser incluidos.</summary>
-    internal PlayerSlotSnapshot? SacarParaSalto(long accountId)
+    /// <summary>Le dice al cliente a donde reconectar. Sale ANTES de soltarlo:
+    /// si se soltara primero, el socket ya estaria cerrado y el aviso no llegaria.</summary>
+    internal void AvisarHandoff(long accountId, string mapCode, MapServer servidor)
     {
-        if (!_players.TryGetValue(accountId, out var slot)) return null;
-        _players.Remove(accountId);
-        Despawn(slot.Entity.Id, DespawnReason.Left);   // los que se quedan lo ven irse
-        return new PlayerSlotSnapshot(slot.Port, slot.Data, slot.SessionId, slot.LaserDamage,
-            slot.Entity.MaxShield, slot.Cargo, slot.Credits, slot.Entity.Hp);
+        if (!_players.TryGetValue(accountId, out var slot)) return;
+        slot.Port.Send(new JumpHandoff
+        {
+            MapCode = mapCode, Host = servidor.Host,
+            Port = servidor.Port, IsTls = servidor.IsTls,
+        }.Encode());
     }
 
-    /// <summary>Y lo mete en el mapa destino, en el punto de llegada del portal.</summary>
-    internal void MeterDesdeSalto(PlayerSlotSnapshot snap, uint x, uint y)
+    /// <summary>Suelta al jugador porque se va a OTRO servidor.
+    ///
+    /// Persiste su nave YA EN EL MAPA DESTINO y en el punto de llegada, y cierra
+    /// el socket. Eso es todo lo que hace falta: cuando reconecte —aqui mismo o
+    /// en otra maquina— el servidor que le toque leera de BD que esta en ese mapa
+    /// y lo pondra ahi. El estado no viaja en manos del cliente ni por un canal
+    /// nuevo entre servidores; viaja por donde ya viajaba.</summary>
+    internal void SoltarPorSalto(long accountId, long mapaDestino, uint x, uint y)
     {
-        var join = new JoinCmd(snap.Port, snap.Data with { PosX = x, PosY = y, CurrentHp = snap.Hp },
-            snap.SessionId, snap.LaserDamage, snap.MaxShield, snap.Cargo);
-        OnJoin(join);
-        if (_players.TryGetValue(snap.Data.AccountId, out var slot)) slot.Credits = snap.Credits;
+        if (!_players.TryGetValue(accountId, out var slot)) return;
+        _players.Remove(accountId);
+        Despawn(slot.Entity.Id, DespawnReason.Left);
+        var (hp, esc) = (slot.Entity.Hp, slot.Entity.Shield);
+        repo.SaveShipState(accountId, mapaDestino, x, y, hp, esc);
+        // El socket NO se cierra aqui. Cerrarlo justo despues de mandar el aviso
+        // era una carrera que el aviso perdia: el frame se queda en la cola de
+        // salida y el cierre lo tira. Cierra el CLIENTE, que es quien sabe que ya
+        // lo recibio. Si decide ignorarlo se queda con un socket sin jugador, y
+        // de eso ya se encarga el ping.
     }
 
     private void OnLeave(LeaveCmd leave)

@@ -72,30 +72,46 @@ public sealed class Universe(Repo repo, ILoggerFactory logs, int tickMs,
         }
     }
 
-    /// <summary>El traslado. Es lo unico que necesita conocer los dos mapas a la vez,
-    /// y por eso vive aqui y no en World.
+    /// <summary>El salto. **Negocia siempre**, aunque el destino lo sirva este
+    /// mismo proceso.
     ///
-    /// El orden importa: primero se comprueba que el destino EXISTE y luego se saca
-    /// al jugador del origen. Al reves, un mapa destino roto dejaria al jugador en
-    /// ninguna parte — sin mundo al que volver y sin mundo al que llegar.</summary>
+    /// Podria haber un atajo —si el mapa es mio, muevo al jugador en memoria— y
+    /// seria mas rapido. Pero entonces el camino del handoff no se ejecutaria
+    /// nunca hasta el dia que se parta la carga, que es el peor momento posible
+    /// para descubrir que no funciona. Sin atajo, partir manana es cambiar filas
+    /// de `map_server`.
+    ///
+    /// El orden es el que es por una razon: primero se comprueba que el destino
+    /// existe y TIENE servidor, luego se avisa al cliente de a donde ir, y solo
+    /// entonces se suelta. Al reves, un destino sin servidor dejaria al jugador
+    /// fuera de todo mapa.</summary>
     private void Saltar(World origen, long accountId, PortalInfo portal)
     {
-        var destino = Obtener(portal.TargetMapCode);
-        if (destino == null || ReferenceEquals(destino, origen)) return;
-
-        var snap = origen.SacarParaSalto(accountId);
-        if (snap == null) return;
-
-        // El destino se ejecuta en el MISMO hilo del bucle (los dos mundos se
-        // tickean aqui), asi que la entrega es directa y no hay carrera: el
-        // jugador nunca esta en los dos mapas a la vez ni en ninguno.
-        destino.MeterDesdeSalto(snap, portal.TargetX, portal.TargetY);
-        Mudanza?.Invoke(snap.Port, destino);
-        _log.LogInformation("cuenta {id} salto de {a} a {b}", accountId,
-            origen.Mapa.Code, destino.Mapa.Code);
+        var mapa = repo.LoadMap(portal.TargetMapCode);
+        if (mapa == null)
+        {
+            _log.LogWarning("salto a {code}: el mapa no existe", portal.TargetMapCode);
+            return;
+        }
+        var servidor = repo.LoadMapServer(mapa.Id);
+        if (servidor == null)
+        {
+            _log.LogWarning("salto a {code}: el mapa no tiene servidor asignado", mapa.Code);
+            return;
+        }
+        origen.AvisarHandoff(accountId, mapa.Code, servidor);
+        origen.SoltarPorSalto(accountId, mapa.Id, portal.TargetX, portal.TargetY);
+        _log.LogInformation("cuenta {id} salta de {a} a {b} en {host}:{port}",
+            accountId, origen.Mapa.Code, mapa.Code, servidor.Host, servidor.Port);
     }
 
-    /// <summary>Avisa a la conexion de que su mundo cambio: sus proximos comandos
-    /// tienen que ir al mapa nuevo, no al que acaba de dejar.</summary>
-    public event Action<IClientPort, World>? Mudanza;
+    /// <summary>El mundo donde esta un jugador segun la BD. Es lo que hace que se
+    /// vuelva a entrar DONDE SE DEJO el juego y no siempre en el mapa inicial —
+    /// un fallo que existia desde antes del salto y que solo se nota cuando hay
+    /// mas de un mapa al que volver.</summary>
+    public World? DondeEsta(long mapId)
+    {
+        var mapa = repo.LoadMapPorId(mapId);
+        return mapa == null ? null : Obtener(mapa.Code);
+    }
 }

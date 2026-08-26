@@ -32,7 +32,11 @@ public sealed record NpcSpawnInfo(long CatalogId, string Code, string DisplayNam
 
 public sealed record PlayerData(long AccountId, string PilotName, byte Faction, string ShipCode,
     uint BaseHp, ushort BaseSpeed, uint CargoCapacity, uint CurrentHp, uint CurrentShield,
-    uint PosX, uint PosY, decimal Credits);
+    uint PosX, uint PosY, decimal Credits, long MapId);
+
+/// <summary>Donde vive un mapa. Hoy todas las filas apuntan al mismo sitio; el
+/// codigo no lo sabe, y por eso partirlos manana es cambiar filas.</summary>
+public sealed record MapServer(string Host, ushort Port, bool IsTls);
 
 public sealed class Repo(string connectionString)
 {
@@ -48,6 +52,25 @@ public sealed class Repo(string connectionString)
                      m.zone_tier AS ZoneTier
               FROM map m JOIN map_station s ON s.map_id = m.id
               WHERE m.is_starter = 1 LIMIT 1");
+    }
+
+    /// <summary>Un mapa por su id. Lo usa la reconexion para saber a que mundo
+    /// devolver al jugador.</summary>
+    public MapInfo? LoadMapPorId(long mapId)
+    {
+        using var db = Open();
+        var code = db.ExecuteScalar<string?>("SELECT code FROM map WHERE id = @mapId", new { mapId });
+        return code == null ? null : LoadMap(code);
+    }
+
+    /// <summary>Donde reconectar para un mapa. Sin fila, el mapa no se sirve.</summary>
+    public MapServer? LoadMapServer(long mapId)
+    {
+        using var db = Open();
+        var f = db.QuerySingleOrDefault(
+            @"SELECT host AS Host, port AS Port, is_tls AS IsTls
+              FROM map_server WHERE map_id = @mapId LIMIT 1", new { mapId });
+        return f == null ? null : new MapServer((string)f.Host, (ushort)f.Port, (bool)f.IsTls);
     }
 
     /// <summary>Un mapa por su codigo. El LEFT JOIN a la estacion es deliberado:
@@ -126,7 +149,8 @@ public sealed class Repo(string connectionString)
                      c.cargo_capacity AS CargoCapacity,
                      st.current_hp AS CurrentHp, st.current_shield AS CurrentShield,
                      st.pos_x AS PosX, st.pos_y AS PosY,
-                     CAST(COALESCE(rb.amount, 0) AS DECIMAL(20,6)) AS Credits
+                     CAST(COALESCE(rb.amount, 0) AS DECIMAL(20,6)) AS Credits,
+                     CAST(st.map_id AS SIGNED) AS MapId
               FROM account a
               JOIN player_ship ps ON ps.account_id = a.id AND ps.is_active = 1
               JOIN ship_catalog c ON c.id = ps.ship_catalog_id
@@ -135,6 +159,9 @@ public sealed class Repo(string connectionString)
                      ON rb.account_id = a.id
                     AND rb.server_item_id = (SELECT id FROM server_item WHERE item_key = 'credits')
               WHERE a.id = @accountId", new { accountId });
+        // OJO: Dapper casa los records posicionales por ORDEN DE COLUMNA, no por
+        // nombre. `MapId` va al final del SELECT porque va al final del record;
+        // ponerlo en medio compila igual y revienta en tiempo de ejecucion.
     }
 
     /// <summary>Cierra cualquier sesion viva de la cuenta y abre la nueva (sesion unica por diseño).</summary>

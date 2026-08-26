@@ -23,23 +23,12 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
 
     public long AccountId { get; private set; }
 
-    private void Mudarse(IClientPort port, World destino)
-    {
-        if (ReferenceEquals(port, this)) _world = destino;
-    }
 
     public void Send(byte[] frame) => _outbox.Writer.TryWrite(frame);
 
     public void CloseSocket() => _cts.Cancel();
 
     public async Task RunAsync()
-    {
-        universo.Mudanza += Mudarse;
-        try { await BucleAsync(); }
-        finally { universo.Mudanza -= Mudarse; }
-    }
-
-    private async Task BucleAsync()
     {
         var envio = Task.Run(SendLoopAsync);
         try
@@ -63,7 +52,18 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
                     return;
                 }
                 AccountId = sesion.Value.AccountId;
-                _world.Post(new ResumeCmd(this, sesion.Value.AccountId, sesion.Value.SessionId));
+                // El mundo sale de DONDE DICE LA BD que esta el jugador, y esto es
+                // lo que hace que el salto funcione sin credencial nueva: el origen
+                // ya lo persistio en el mapa destino antes de soltarlo.
+                var quien = repo.LoadPlayer(sesion.Value.AccountId);
+                if (quien is not null) _world = universo.DondeEsta(quien.MapId) ?? _world;
+                // Se manda tambien con QUE reconstruirlo: si este mundo no lo ha
+                // visto nunca —que es justo el caso al llegar de otro mapa— entra
+                // de cero en vez de recibir un RESUME_EXPIRED.
+                _world.Post(new ResumeCmd(this, sesion.Value.AccountId, sesion.Value.SessionId,
+                    quien, quien is null ? 0 : repo.LoadLaserDamage(sesion.Value.AccountId),
+                    quien is null ? 0 : repo.LoadShieldCapacity(sesion.Value.AccountId),
+                    quien is null ? null : repo.LoadCargo(sesion.Value.AccountId)));
                 await LoopAsync();
                 return;
             }
@@ -92,6 +92,10 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
                 return;
             }
             var player = repo.LoadPlayer(accountId);
+            // Se entra DONDE SE DEJO el juego, no siempre en el mapa inicial. Antes
+            // daba igual porque solo habia un mapa; en cuanto hay dos, entrar
+            // siempre en el 1-1 teletransporta a quien cerro sesion en otro sitio.
+            if (player is not null) _world = universo.DondeEsta(player.MapId) ?? _world;
             if (player is null)
             {
                 Send(new ErrorReply { Code = ErrorCode.Generic, Detail = "cuenta sin nave" }.Encode());
