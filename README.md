@@ -92,6 +92,21 @@ Lo que **no** se copio del legado:
   la lista. Aqui gana el mas cercano.
 - `DateTime.Now` disperso; aqui el tiempo es el tick inyectado.
 
+## La bodega y las cajas
+
+La capacidad es **identidad de la nave** (`ship_catalog.cargo_capacity`), no un producto:
+las guidelines cerraron la puerta a los extensores de slot. La progresion llega por naves
+mayores del roster y por el **AMP-CRG** crafteable (+% de bodega), que es de E4.
+
+La Phoenix arranca con **300** (migracion `.8`). Antes eran 100 y la proporcion estaba rota:
+un Vex suelta 30-60, asi que el jugador se llenaba cada dos muertes, y las cajas del Ferox
+(hasta 180) y del Skarnox (hasta 240) **ni cabian**. La recogida parcial deja el resto en la
+caja, pero la caja **expira a los 150 s**, asi que lejos de la base el sobrante se evaporaba
+— y los materiales salen unica y exclusivamente de esas cajas.
+
+Recoger nunca destruye lo que no cabe: se toma lo que quepa, el resto sigue en la caja y la
+caja solo desaparece cuando queda vacia (o al expirar).
+
 ## Muerte del jugador
 
 Cuando el casco llega a 0: `EntityDestroyed`, y la **bodega volante** se queda en el sitio
