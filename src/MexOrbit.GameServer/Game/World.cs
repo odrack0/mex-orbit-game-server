@@ -30,6 +30,7 @@ public sealed record SellToNpcCmd(IClientPort Port, ulong RequestId, string Mate
 /// por el nuevo y la nave sigue donde estaba, sin recrearla.</summary>
 public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId) : WorldCmd;
 public sealed record ChatSendCmd(IClientPort Port, ulong RequestId, ChatChannel Channel, string Text) : WorldCmd;
+public sealed record RespawnSelectCmd(IClientPort Port, ulong OptionId) : WorldCmd;
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
     RefineRecipe? refineRecipe, List<NpcPrice> npcPrices, List<PortalInfo> portals,
@@ -43,6 +44,14 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     private const int BoxTtlMs = 150_000;      // §7 guidelines: despawn de caja 2-3 min
     private const int GraceMs = 60_000;        // ventana de reconexion (auth-v1)
     private const int ChatMaxLen = 256;
+    // IA de NPCs (portada del legado; ver NpcAi.cs)
+    private const int AiThinkMs = 1000;          // el legado pensaba 1 vez por segundo
+    private const int NpcAttackIntervalMs = 1000;
+    private const double NpcAttackRange = 600;   // igual que el laser del jugador
+    private const double AproximacionRadio = 300;   // ALIEN_DISTANCE_TO_USER del legado
+    private const double DesaggroFactor = 1.8;   // se rinde a este multiplo de su aggro
+    private const int NpcShieldRegenMs = 1000;   // 10% del maximo por segundo...
+    private const int NpcOutOfCombatMs = 10_000; // ...tras 10 s sin recibir fuego
 
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
 
@@ -69,6 +78,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         /// <summary>Tick en que expira la gracia; long.MaxValue = socket vivo.</summary>
         public long GraceUntilTick = long.MaxValue;
         public bool Desconectado => GraceUntilTick != long.MaxValue;
+        /// <summary>Destruido y esperando a elegir reaparicion: ni vuela ni dispara.</summary>
+        public bool Muerto;
         public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
     }
 
@@ -84,6 +95,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     private readonly Dictionary<long, PlayerSlot> _players = new();     // account_id -> slot
     private readonly Dictionary<ulong, Entity> _npcs = new();
     private readonly Dictionary<ulong, NpcSpawnInfo> _npcInfo = new();  // entity_id -> catalogo
+    private readonly Dictionary<ulong, NpcAi> _npcAi = new();           // entity_id -> su IA
     private readonly Dictionary<ulong, BoxState> _boxes = new();
     private readonly List<(long Tick, NpcSpawnInfo Info, ulong Id)> _respawns = new();
     private readonly Dictionary<long, string> _lootIds =
@@ -129,6 +141,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         e.TargetY = e.Y;
         _npcs[e.Id] = e;
         _npcInfo[e.Id] = spawn;
+        _npcAi[e.Id] = new NpcAi { ProximoPensamientoTick = _tick + _rng.Next(0, AiThinkMs / tickMs) };
         return e;
     }
 
@@ -152,18 +165,10 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     {
         while (_inbox.Reader.TryRead(out var cmd)) Handle(cmd);
 
-        // NPCs: deambular perezoso dentro del mapa
-        foreach (var npc in _npcs.Values)
+        // NPCs: la maquina de estados del legado (vagabundear / perseguir / pegar)
+        foreach (var npc in _npcs.Values.ToList())
         {
-            // bajo fuego reciente el NPC no deambula: se queda a pelear (bueno
-            // para el juego y para que el combate no se escape del rango)
-            if (_tick - npc.LastHitTick < 3000 / tickMs) continue;
-            if (!npc.Moving && _rng.NextDouble() < 0.004)
-            {
-                npc.TargetX = Math.Clamp(npc.X + _rng.Next(-800, 801), 0, map.BoundsX);
-                npc.TargetY = Math.Clamp(npc.Y + _rng.Next(-800, 801), 0, map.BoundsY);
-                Broadcast(npc.ToMove().Encode());
-            }
+            PensarNpc(npc);
             npc.Step(dt);
         }
         foreach (var slot in _players.Values)
@@ -255,7 +260,202 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             case SellToNpcCmd sell: OnSellToNpc(sell); break;
             case ResumeCmd resume: OnResume(resume); break;
             case ChatSendCmd chat: OnChatSend(chat); break;
+            case RespawnSelectCmd resp: OnRespawnSelect(resp); break;
         }
+    }
+
+
+    // ─── IA de los NPCs (portada del legado; ver NpcAi.cs) ──────────────────
+
+    /// <summary>Un latido de IA: pensar (1/s) y, si toca, disparar.</summary>
+    private void PensarNpc(Entity npc)
+    {
+        if (!_npcAi.TryGetValue(npc.Id, out var ai)) return;
+        var info = _npcInfo[npc.Id];
+
+        RegenerarEscudo(npc, info);
+
+        if (_tick >= ai.ProximoPensamientoTick)
+        {
+            ai.ProximoPensamientoTick = _tick + AiThinkMs / tickMs;
+            switch (ai.Estado)
+            {
+                case NpcAiState.Buscando: Buscar(npc, info, ai); break;
+                case NpcAiState.VolandoAlEnemigo: Aproximarse(npc, info, ai); break;
+                case NpcAiState.EsperandoQueSeMueva: EsperarMovimiento(npc, info, ai); break;
+            }
+        }
+
+        if (!ai.Atacando || _tick < ai.ProximoDisparoTick) return;
+        var presa = PresaDe(ai);
+        if (presa is null) { ai.Olvidar(); return; }
+        if (Distancia(npc, presa.Entity) > NpcAttackRange) return;   // fuera de alcance: espera
+        ai.ProximoDisparoTick = _tick + NpcAttackIntervalMs / tickMs;
+        AplicarDanioAJugador(npc, info, presa);
+    }
+
+    private void Buscar(Entity npc, NpcSpawnInfo info, NpcAi ai)
+    {
+        var presa = JugadorMasCercano(npc, info.AggroRadius);
+        if (presa is not null)
+        {
+            ai.TargetId = presa.Entity.Id;
+            // los pasivos SIGUEN al jugador pero no abren fuego: solo devuelven
+            // golpes (el ReceiveAttack del legado). El Ferox si es cazador.
+            if (info.IsAggressive) ai.Atacando = true;
+            ai.Estado = NpcAiState.VolandoAlEnemigo;
+            return;
+        }
+        // sin presa y quieto: a cruzar el mapa. Esto es lo que lo hace estar VIVO
+        // en vez de girar sobre su propio eje.
+        if (npc.Moving) return;
+        npc.TargetX = _rng.Next(500, (int)map.BoundsX - 500);
+        npc.TargetY = _rng.Next(500, (int)map.BoundsY - 500);
+        Broadcast(npc.ToMove().Encode());
+    }
+
+    private void Aproximarse(Entity npc, NpcSpawnInfo info, NpcAi ai)
+    {
+        var presa = PresaDe(ai);
+        if (presa is null || Distancia(npc, presa.Entity) > info.AggroRadius * DesaggroFactor)
+        {
+            ai.Olvidar();
+            return;
+        }
+        // un punto del circulo alrededor del jugador, no encima de el: asi los
+        // bichos rodean en vez de amontonarse en el mismo pixel
+        var angulo = _rng.NextDouble() * Math.PI * 2;
+        npc.TargetX = Math.Clamp(presa.Entity.X + Math.Cos(angulo) * AproximacionRadio, 0, map.BoundsX);
+        npc.TargetY = Math.Clamp(presa.Entity.Y + Math.Sin(angulo) * AproximacionRadio, 0, map.BoundsY);
+        Broadcast(npc.ToMove().Encode());
+        ai.Estado = NpcAiState.EsperandoQueSeMueva;
+    }
+
+    private void EsperarMovimiento(Entity npc, NpcSpawnInfo info, NpcAi ai)
+    {
+        var presa = PresaDe(ai);
+        if (presa is null || Distancia(npc, presa.Entity) > info.AggroRadius * DesaggroFactor)
+        {
+            ai.Olvidar();
+            return;
+        }
+        if (presa.Entity.Moving) ai.Estado = NpcAiState.VolandoAlEnemigo;
+    }
+
+    /// <summary>Escudo del NPC: 10% del maximo por segundo, tras 10 s sin recibir
+    /// fuego (el CheckShieldPointsRepair del legado).</summary>
+    private void RegenerarEscudo(Entity npc, NpcSpawnInfo info)
+    {
+        if (npc.Shield >= npc.MaxShield) return;
+        if (_tick - npc.LastHitTick < NpcOutOfCombatMs / tickMs) return;
+        if (_tick % (NpcShieldRegenMs / tickMs) != 0) return;
+        npc.Shield = Math.Min(npc.MaxShield, npc.Shield + Math.Max(1, npc.MaxShield / 10));
+    }
+
+    private PlayerSlot? PresaDe(NpcAi ai) =>
+        ai.TargetId == 0 ? null
+            : _players.Values.FirstOrDefault(s => s.Entity.Id == ai.TargetId && !s.Muerto && !s.EnBase);
+
+    /// <summary>El jugador vivo mas cercano dentro del radio. El legado recorria
+    /// todos sin cortar y se quedaba con el ultimo; aqui gana el mas cercano.</summary>
+    private PlayerSlot? JugadorMasCercano(Entity npc, uint radio)
+    {
+        PlayerSlot? mejor = null;
+        var mejorDist = double.MaxValue;
+        foreach (var slot in _players.Values)
+        {
+            // la zona segura de la estacion es el DMZ del legado: ahi no se entra
+            if (slot.Muerto || slot.EnBase || slot.Desconectado) continue;
+            var d = Distancia(npc, slot.Entity);
+            if (d <= radio && d < mejorDist) { mejorDist = d; mejor = slot; }
+        }
+        return mejor;
+    }
+
+    private static double Distancia(Entity a, Entity b) =>
+        Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
+
+    private void AplicarDanioAJugador(Entity npc, NpcSpawnInfo info, PlayerSlot slot)
+    {
+        // el legado sorteaba +-10% sobre el daño base; se conserva
+        var baseDanio = (int)info.Damage;
+        var danio = (uint)Math.Max(1, baseDanio + _rng.Next(-baseDanio / 10, baseDanio / 10 + 1));
+        var alEscudo = Math.Min(slot.Entity.Shield, danio);
+        slot.Entity.Shield -= alEscudo;
+        var alCasco = Math.Min(slot.Entity.Hp, danio - alEscudo);
+        slot.Entity.Hp -= alCasco;
+
+        Broadcast(new AttackEvent
+        {
+            AttackerId = npc.Id, TargetId = slot.Entity.Id, Weapon = Weapon.Laser,
+            Damage = danio, TargetHp = slot.Entity.Hp, TargetShield = slot.Entity.Shield,
+            Missed = false, AmmoId = "ammo_cel_1", Skilled = false,
+        }.Encode());
+        slot.Port.Send(HeroStatsDe(slot).Encode());
+
+        if (slot.Entity.Hp == 0) OnJugadorMuerto(slot, npc);
+    }
+
+    /// <summary>Muerte del jugador. La bodega VOLANTE se queda en el sitio dentro
+    /// de una caja: transferencia, no destruccion (guidelines §7). El almacen de
+    /// la base no se toca — para eso esta separado del hold.</summary>
+    private void OnJugadorMuerto(PlayerSlot slot, Entity asesino)
+    {
+        slot.Muerto = true;
+        slot.LaserOn = false;
+        slot.TargetId = 0;
+        slot.Entity.TargetX = slot.Entity.X;
+        slot.Entity.TargetY = slot.Entity.Y;
+        foreach (var ai in _npcAi.Values.Where(a => a.TargetId == slot.Entity.Id)) ai.Olvidar();
+
+        Broadcast(new EntityDestroyed { EntityId = slot.Entity.Id, KillerId = asesino.Id }.Encode());
+
+        if (slot.Cargo.Count > 0)
+        {
+            var caja = new BoxState
+            {
+                Id = _nextBoxId++, X = slot.Entity.X, Y = slot.Entity.Y,
+                Drops = new Dictionary<long, uint>(slot.Cargo),
+                ExpiraTick = _tick + BoxTtlMs / tickMs,
+            };
+            _boxes[caja.Id] = caja;
+            Broadcast(new BoxSpawn
+            {
+                BoxId = caja.Id, BoxType = "from_ship",
+                X = (ulong)Math.Round(caja.X), Y = (ulong)Math.Round(caja.Y),
+            }.Encode());
+            slot.Cargo.Clear();
+            var id = slot.Data.AccountId;
+            _ = Task.Run(() => Safe(() => repo.ClearCargo(id, (long)caja.Id), "ClearCargo"));
+        }
+
+        var opciones = new RespawnOptions { Cause = DeathCause.Npc, KillerName = asesino.Name };
+        opciones.Options.Add(new RespawnOption
+        {
+            OptionId = 1, LabelKey = "respawn.base", CostCredits = 0, Available = true,
+        });
+        slot.Port.Send(opciones.Encode());
+        log.LogInformation("cuenta {id} destruida por {npc}", slot.Data.AccountId, asesino.Name);
+    }
+
+    private void OnRespawnSelect(RespawnSelectCmd cmd)
+    {
+        var slot = SlotDe(cmd.Port);
+        if (slot is null || !slot.Muerto) return;
+        // en el slice hay una sola opcion: reaparecer en la base, entera y gratis
+        slot.Muerto = false;
+        slot.Entity.Hp = slot.Entity.MaxHp;
+        slot.Entity.Shield = slot.Entity.MaxShield;
+        slot.Entity.X = map.StationX;
+        slot.Entity.Y = map.StationY;
+        slot.Entity.TargetX = slot.Entity.X;
+        slot.Entity.TargetY = slot.Entity.Y;
+        Broadcast(slot.Entity.ToSpawn().Encode());
+        slot.Port.Send(HeroStatsDe(slot).Encode());
+        ActualizarRangoBase(slot);
+        var (id, mapId, x, y, hp, esc) = (slot.Data.AccountId, map.Id,
+            (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield);
+        _ = Task.Run(() => Safe(() => repo.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
     }
 
     // ─── reconexion y chat ──────────────────────────────────────────────────
@@ -443,7 +643,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     {
         var slot = SlotDe(laser.Port);
         if (slot is null) return;
-        slot.LaserOn = laser.Active && slot.TargetId != 0;
+        slot.LaserOn = !slot.Muerto && laser.Active && slot.TargetId != 0;
     }
 
     private void AplicarDanio(PlayerSlot slot, Entity npc)
@@ -455,6 +655,9 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         var alCasco = Math.Min(npc.Hp, danio - alEscudo);
         npc.Hp -= alCasco;
         npc.LastHitTick = _tick;
+        // ReceiveAttack del legado: quien le pega se vuelve su objetivo, sea el
+        // bicho agresivo o no. Un pasivo no es un saco de boxeo: se defiende.
+        if (_npcAi.TryGetValue(npc.Id, out var ai)) ai.Devolver(slot.Entity.Id);
         // el golpe lo frena en seco donde este (y avisa a todos)
         if (npc.Moving)
         {
@@ -479,6 +682,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         var info = _npcInfo[npc.Id];
         _npcs.Remove(npc.Id);
         _npcInfo.Remove(npc.Id);
+        _npcAi.Remove(npc.Id);
         foreach (var s in _players.Values.Where(s => s.TargetId == npc.Id))
         {
             s.TargetId = 0;
@@ -721,6 +925,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         var slot = _players.Values.FirstOrDefault(s => ReferenceEquals(s.Port, move.Port));
         if (slot is null) return;
         // seq monotona: lo viejo o duplicado se descarta sin drama
+        if (slot.Muerto) return;
         if (move.Intent.Seq <= slot.LastSeq) return;
         slot.LastSeq = move.Intent.Seq;
         // clamp server-side a los limites del mapa: el Moving eterno del legado, imposible

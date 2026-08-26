@@ -140,6 +140,9 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                     var sn = SellToNpc.Decode(frame);
                     world.Post(new SellToNpcCmd(this, sn.RequestId, sn.MaterialId, sn.Amount));
                     break;
+                case RespawnSelect.MsgId:
+                    world.Post(new RespawnSelectCmd(this, RespawnSelect.Decode(frame).OptionId));
+                    break;
                 case ChatSend.MsgId:
                     var cs = ChatSend.Decode(frame);
                     world.Post(new ChatSendCmd(this, cs.RequestId, cs.Channel, cs.Text));

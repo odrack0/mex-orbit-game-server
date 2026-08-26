@@ -50,10 +50,58 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `CollectRange` | `Game-World.cs` | 250 | Distancia maxima para recolectar una caja |
 | `BoxTtlMs` | `Game-World.cs` | 150 s | Vida de la caja (2-3 min, guidelines seccion 7) |
 | Write-behind | `Game-World.cs (Tick)` | 30 s | Cadencia maxima de persistencia de player_ship_state |
-| Deambular de NPCs | `Game-World.cs (Tick)` | p=0.004 por tick, radio 800 | El wander perezoso |
+| Deambular de NPCs | `Game-NpcAi.cs` | destino en todo el mapa | Sustituido por la IA portada del legado (ver abajo): ya no es un tembleque de radio 800 |
 | Rango de la estacion | BD `map_station.secure_range` | 1500 | Dentro de este radio se puede descargar y vender (dato, no constante) |
 | `GraceMs` | `Game-World.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
 | `ChatMaxLen` | `Game-World.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
+| `AiThinkMs` | `Game-World.cs` | 1 s | Cada cuanto PIENSA un NPC (el legado tambien pensaba 1 vez por segundo) |
+| `NpcAttackIntervalMs` | `Game-World.cs` | 1 s | Cadencia de disparo del NPC |
+| `NpcAttackRange` | `Game-World.cs` | 600 | Alcance de su laser (igual que el del jugador) |
+| `AproximacionRadio` | `Game-World.cs` | 300 | A que distancia se planta junto a su presa (`ALIEN_DISTANCE_TO_USER` del legado) |
+| `DesaggroFactor` | `Game-World.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
+| `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Game-World.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
+| Aggro y agresividad | BD `npc_catalog.aggro_radius` / `is_aggressive` | 500-700 · solo el Ferox | Datos, no constantes: el radio y si caza son del catalogo |
+| Daño del NPC | BD `npc_catalog.damage` | 25-75 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
+
+## La IA de los NPCs
+
+Portada del server legado (`Game/Objects/AI/NpcAI.cs`), en `Game/NpcAi.cs`. **Maquina de
+tres estados**, un pensamiento por segundo:
+
+1. **Buscando** — barre jugadores dentro de su `aggro_radius`. Sin presa y quieto, elige un
+   punto **cualquiera del mapa** y vuela hasta el. Esto es lo que hace que el sector se
+   sienta vivo: los bichos lo cruzan, no tiemblan en su sitio.
+2. **VolandoAlEnemigo** — se coloca en un punto aleatorio del **circulo** de radio 300
+   alrededor del jugador, no encima de el: asi rodean en vez de amontonarse en un pixel.
+3. **EsperandoQueSeMueva** — aguanta ahi; si el jugador se mueve, vuelve a aproximarse.
+
+**Pasivo no es inofensivo.** Recibir un golpe convierte a cualquier NPC en agresor (el
+`ReceiveAttack` del legado), sea o no `is_aggressive`. En el 1-1 solo el **Ferox** caza por
+iniciativa propia; los otros cuatro devuelven el fuego.
+
+**La zona segura de la estacion es el DMZ del legado**: dentro de ella no se entra ni se
+elige presa.
+
+Lo que **no** se copio del legado:
+
+- Sorteaba el destino en `20000x12800` a mano teniendo un mapa de `20800x12800`, asi que sus
+  bichos nunca visitaban la franja derecha. Aqui los limites salen del mapa.
+- Usaba `RenderRange` (2000, fijo en codigo) como radio de aggro. Aqui es
+  `npc_catalog.aggro_radius`, un dial por especie en BD.
+- Su bucle recorria **todos** los jugadores en rango sin cortar, asi que mandaba el ultimo de
+  la lista. Aqui gana el mas cercano.
+- `DateTime.Now` disperso; aqui el tiempo es el tick inyectado.
+
+## Muerte del jugador
+
+Cuando el casco llega a 0: `EntityDestroyed`, y la **bodega volante** se queda en el sitio
+dentro de una caja — *transferencia, no destruccion* (guidelines §7). El **almacen de la base
+no se toca**: para eso `player_cargo_hold` esta separado de `player_resource_balance` desde el
+dia uno. La salida se asienta en el ledger como `CARGO_LOST` con la caja como referencia.
+
+Despues el server manda `RespawnOptions`. En el slice hay una sola opcion (volver a la base,
+entera y gratis); el contrato ya transporta coste y disponibilidad para las demas. Mientras
+esta muerto, el jugador no vuela ni dispara, y los NPCs que lo tenian fichado lo olvidan.
 
 ## Mobiliario del mapa
 
