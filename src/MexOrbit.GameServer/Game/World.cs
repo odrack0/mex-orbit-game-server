@@ -31,6 +31,7 @@ public sealed record SellToNpcCmd(IClientPort Port, ulong RequestId, string Mate
 public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId) : WorldCmd;
 public sealed record ChatSendCmd(IClientPort Port, ulong RequestId, ChatChannel Channel, string Text) : WorldCmd;
 public sealed record RespawnSelectCmd(IClientPort Port, ulong OptionId) : WorldCmd;
+public sealed record JumpCmd(IClientPort Port, ulong RequestId, ulong PortalId) : WorldCmd;
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
     RefineRecipe? refineRecipe, List<NpcPrice> npcPrices, List<PortalInfo> portals,
@@ -55,6 +56,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
     private const int NpcOutOfCombatMs = 10_000; // ...tras 10 s sin recibir fuego
     private const int HuidaMs = 12_000;          // cuanto corre un cobarde antes de recomponerse
     private const double HuidaDistancia = 2500;  // a que distancia se larga
+    private const double JumpRange = 600;        // hay que estar JUNTO al portal para saltar
 
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
 
@@ -149,21 +151,30 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         return e;
     }
 
-    public async Task RunAsync(CancellationToken ct)
+    /// <summary>Un paso de simulacion. Lo llama el <see cref="Universe"/>, que lleva
+    /// UN bucle para todos los mapas: 29 temporizadores para 28 mapas vacios seria
+    /// tirar el reloj a la basura.</summary>
+    internal void Paso(double dt)
     {
-        var dt = tickMs / 1000.0;
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(tickMs));
-        while (await timer.WaitForNextTickAsync(ct))
+        _tick++;
+        try { Tick(dt); }
+        catch (Exception ex)
         {
-            _tick++;
-            try { Tick(dt); }
-            catch (Exception ex)
-            {
-                // el tick JAMAS tumba el loop: se loguea y se sigue (leccion del legado)
-                log.LogError(ex, "excepcion en tick {tick}", _tick);
-            }
+            // el tick JAMAS tumba el loop: se loguea y se sigue (leccion del legado)
+            log.LogError(ex, "excepcion en tick {tick} del mapa {code}", _tick, map.Code);
         }
     }
+
+    /// <summary>Un mapa sin jugadores NI comandos pendientes no necesita simularse:
+    /// sus NPC no vagabundean para nadie.
+    ///
+    /// La segunda condicion no es un detalle. Mirando solo los jugadores, el mapa
+    /// al que alguien acaba de entrar sigue vacio —el Join esta en la cola, sin
+    /// procesar— asi que no se tickearia, asi que el Join no se procesaria nunca.
+    /// Un mundo que se niega a despertar para atender lo que le despertaria.</summary>
+    internal bool Ocioso => _players.Count == 0 && _inbox.Reader.Count == 0;
+
+    internal MapInfo Mapa => map;
 
     private void Tick(double dt)
     {
@@ -254,6 +265,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         switch (cmd)
         {
             case JoinCmd join: OnJoin(join); break;
+            case JumpCmd salto: OnJump(salto); break;
             case LeaveCmd leave: OnLeave(leave); break;
             case MoveIntentCmd move: OnMoveIntent(move); break;
             case PongCmd pong: OnPong(pong); break;
@@ -928,6 +940,73 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
                 X = (ulong)Math.Round(caja.X), Y = (ulong)Math.Round(caja.Y),
             }.Encode());
         EnviarAlmacen(slot);
+    }
+
+    /// <summary>Salto de sector. El mundo VALIDA; mover al jugador es del Universo,
+    /// que es el unico que conoce los dos mapas.
+    ///
+    /// El cliente pide el salto cuando ARRANCA el encendido del portal, no cuando
+    /// termina: esos 2,1 s de animacion son el hueco donde cabe este viaje. Si el
+    /// server dice que no, la animacion se queda a medias y el ErrorReply explica
+    /// por que — nunca silencio.</summary>
+    private void OnJump(JumpCmd cmd)
+    {
+        var slot = _players.Values.FirstOrDefault(s => ReferenceEquals(s.Port, cmd.Port));
+        if (slot == null) return;
+
+        var portal = portals.FirstOrDefault(p => (ulong)p.Id == cmd.PortalId);
+        if (portal == null)
+        {
+            Error(cmd.Port, cmd.RequestId, ErrorCode.Gone, "ese portal no existe en este mapa");
+            return;
+        }
+        if (!portal.IsWorking)
+        {
+            Error(cmd.Port, cmd.RequestId, ErrorCode.Invalid, "ese portal esta inactivo");
+            return;
+        }
+        if (slot.Muerto)
+        {
+            Error(cmd.Port, cmd.RequestId, ErrorCode.Invalid, "no se salta estando destruido");
+            return;
+        }
+        // el rango se valida en el SERVER aunque el cliente ya lo compruebe: el
+        // cliente propone, el server dispone (y el cliente puede mentir)
+        var dx = slot.Entity.X - portal.X;
+        var dy = slot.Entity.Y - portal.Y;
+        if (dx * dx + dy * dy > JumpRange * JumpRange)
+        {
+            Error(cmd.Port, cmd.RequestId, ErrorCode.TooFar, "hay que estar junto al portal");
+            return;
+        }
+        Saltar?.Invoke(this, slot.Data.AccountId, portal);
+    }
+
+    private static void Error(IClientPort port, ulong requestId, ErrorCode code, string detalle) =>
+        port.Send(new ErrorReply { RequestId = requestId, Code = code, Detail = detalle }.Encode());
+
+    /// <summary>Lo levanta el Universo: (mundo de origen, cuenta, portal usado).</summary>
+    internal event Action<World, long, PortalInfo>? Saltar;
+
+    /// <summary>Saca al jugador SIN persistir una salida: no se ha ido del juego, se
+    /// esta mudando de mapa. Devuelve su estado para que el mapa destino lo reciba
+    /// entero — bodega, creditos y danio del laser incluidos.</summary>
+    internal PlayerSlotSnapshot? SacarParaSalto(long accountId)
+    {
+        if (!_players.TryGetValue(accountId, out var slot)) return null;
+        _players.Remove(accountId);
+        Despawn(slot.Entity.Id, DespawnReason.Left);   // los que se quedan lo ven irse
+        return new PlayerSlotSnapshot(slot.Port, slot.Data, slot.SessionId, slot.LaserDamage,
+            slot.Entity.MaxShield, slot.Cargo, slot.Credits, slot.Entity.Hp);
+    }
+
+    /// <summary>Y lo mete en el mapa destino, en el punto de llegada del portal.</summary>
+    internal void MeterDesdeSalto(PlayerSlotSnapshot snap, uint x, uint y)
+    {
+        var join = new JoinCmd(snap.Port, snap.Data with { PosX = x, PosY = y, CurrentHp = snap.Hp },
+            snap.SessionId, snap.LaserDamage, snap.MaxShield, snap.Cargo);
+        OnJoin(join);
+        if (_players.TryGetValue(snap.Data.AccountId, out var slot)) slot.Credits = snap.Credits;
     }
 
     private void OnLeave(LeaveCmd leave)

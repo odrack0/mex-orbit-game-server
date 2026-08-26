@@ -1,5 +1,5 @@
 // mex-orbit-game-server — el servidor de simulacion, minimo del vertical slice (E2/I3).
-// Un mapa, tick fijo de 80 ms, handshake con ticket Ed25519 de la api, sesion unica.
+// Mapas bajo demanda con un solo tick de 80 ms, handshake con ticket Ed25519 de la api, sesion unica.
 // Transporte dev: ws:// en 5200 (TLS lo aporta la infraestructura en prod: wss://).
 using MexOrbit.GameServer.Data;
 using MexOrbit.GameServer.Game;
@@ -19,21 +19,17 @@ var app = builder.Build();
 var log = app.Services.GetRequiredService<ILoggerFactory>();
 
 var repo = new Repo(conn);
-var mapa = repo.LoadStarterMap();
-var spawns = repo.LoadNpcSpawns(mapa.Id);
-var bias = repo.LoadZoneBias(mapa.ZoneTier);
-var receta = repo.LoadRefineRecipe();
-var precios = repo.LoadNpcPrices();
-var portales = repo.LoadPortals(mapa.Id);
 // dial de JUEGO, no de despliegue: vive en server_setting con su auditoria
 var npcCombat = repo.LoadBoolSetting("npc_combat_enabled", true);
-var world = new World(mapa, spawns, bias, receta, precios, portales, repo, log.CreateLogger<World>(),
-    tickMs, pingInterval, pingMisses, npcCombat);
-world.SpawnNpcs();
+// Los mapas se levantan cuando alguien entra, no al arrancar: 29 mapas serian 29
+// consultas y 29 poblaciones de NPC antes de que exista un solo jugador.
+var universo = new Universe(repo, log, tickMs, pingInterval, pingMisses, npcCombat);
+var world = universo.Inicial();
+var mapa = world.Mapa;
 
 var verifier = new TicketVerifier(pubKeyPath);
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-_ = Task.Run(() => world.RunAsync(lifetime.ApplicationStopping));
+_ = Task.Run(() => universo.RunAsync(lifetime.ApplicationStopping));
 
 app.UseWebSockets();
 app.Map("/ws", async context =>
@@ -44,12 +40,12 @@ app.Map("/ws", async context =>
         return;
     }
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
-    var conexion = new ClientConnection(socket, world, repo, verifier, protocolVersion,
+    var conexion = new ClientConnection(socket, universo, repo, verifier, protocolVersion,
         log.CreateLogger<ClientConnection>());
     await conexion.RunAsync();
 });
 app.MapGet("/health", () => Results.Ok(new { status = "ok", map = mapa.Code }));
 
-app.Logger.LogInformation("game server listo: mapa {code} ({x}x{y}), tick {tick} ms, clave publica {key}",
+app.Logger.LogInformation("game server listo: entrada {code} ({x}x{y}), tick {tick} ms, clave publica {key}",
     mapa.Code, mapa.BoundsX, mapa.BoundsY, tickMs, pubKeyPath);
 app.Run();

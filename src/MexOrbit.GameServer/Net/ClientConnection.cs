@@ -9,20 +9,37 @@ using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Net;
 
-public sealed class ClientConnection(WebSocket socket, World world, Repo repo, TicketVerifier verifier,
+public sealed class ClientConnection(WebSocket socket, Universe universo, Repo repo, TicketVerifier verifier,
     int protocolVersion, ILogger log) : IClientPort
 {
     private const int MaxFrame = 64 * 1024;
     private readonly Channel<byte[]> _outbox = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
 
+    // El mundo de una conexion NO es fijo: cambia al saltar de sector. El Universo
+    // avisa cuando se muda, porque si los comandos siguieran yendo al mapa viejo
+    // el jugador quedaria manejando un fantasma.
+    private World _world = universo.Inicial();
+
     public long AccountId { get; private set; }
+
+    private void Mudarse(IClientPort port, World destino)
+    {
+        if (ReferenceEquals(port, this)) _world = destino;
+    }
 
     public void Send(byte[] frame) => _outbox.Writer.TryWrite(frame);
 
     public void CloseSocket() => _cts.Cancel();
 
     public async Task RunAsync()
+    {
+        universo.Mudanza += Mudarse;
+        try { await BucleAsync(); }
+        finally { universo.Mudanza -= Mudarse; }
+    }
+
+    private async Task BucleAsync()
     {
         var envio = Task.Run(SendLoopAsync);
         try
@@ -46,7 +63,7 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                     return;
                 }
                 AccountId = sesion.Value.AccountId;
-                world.Post(new ResumeCmd(this, sesion.Value.AccountId, sesion.Value.SessionId));
+                _world.Post(new ResumeCmd(this, sesion.Value.AccountId, sesion.Value.SessionId));
                 await LoopAsync();
                 return;
             }
@@ -93,7 +110,7 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
                 ServerTimeMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 TickRate = 1000 / 80u,
             }.Encode());
-            world.Post(new JoinCmd(this, player, sessionId, laserDamage, maxShield, cargo));
+            _world.Post(new JoinCmd(this, player, sessionId, laserDamage, maxShield, cargo));
             await LoopAsync();
         }
         catch (OperationCanceledException) { /* cierre pedido por el mundo */ }
@@ -102,7 +119,7 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
         {
             // DROPPED (no LOGOUT): una caida abre la ventana de gracia; solo el
             // LogoutRequest explicito saca la nave del mundo
-            world.Post(new LeaveCmd(this, "DROPPED"));
+            _world.Post(new LeaveCmd(this, "DROPPED"));
             _outbox.Writer.TryComplete();
             try { await envio; } catch { /* ya cerrando */ }
             socket.Dispose();
@@ -125,29 +142,33 @@ public sealed class ClientConnection(WebSocket socket, World world, Repo repo, T
         {
             switch (LeerMsgId(frame))
             {
-                case MoveIntent.MsgId: world.Post(new MoveIntentCmd(this, MoveIntent.Decode(frame))); break;
-                case Pong.MsgId: world.Post(new PongCmd(this, Pong.Decode(frame).Nonce)); break;
-                case SelectTarget.MsgId: world.Post(new SelectTargetCmd(this, SelectTarget.Decode(frame).EntityId)); break;
-                case LaserToggle.MsgId: world.Post(new LaserToggleCmd(this, LaserToggle.Decode(frame).Active)); break;
+                case MoveIntent.MsgId: _world.Post(new MoveIntentCmd(this, MoveIntent.Decode(frame))); break;
+                case Pong.MsgId: _world.Post(new PongCmd(this, Pong.Decode(frame).Nonce)); break;
+                case SelectTarget.MsgId: _world.Post(new SelectTargetCmd(this, SelectTarget.Decode(frame).EntityId)); break;
+                case LaserToggle.MsgId: _world.Post(new LaserToggleCmd(this, LaserToggle.Decode(frame).Active)); break;
                 case CollectBox.MsgId:
                     var cb = CollectBox.Decode(frame);
-                    world.Post(new CollectBoxCmd(this, cb.RequestId, cb.BoxId));
+                    _world.Post(new CollectBoxCmd(this, cb.RequestId, cb.BoxId));
                     break;
                 case UnloadCargo.MsgId:
-                    world.Post(new UnloadCargoCmd(this, UnloadCargo.Decode(frame).RequestId));
+                    _world.Post(new UnloadCargoCmd(this, UnloadCargo.Decode(frame).RequestId));
                     break;
                 case SellToNpc.MsgId:
                     var sn = SellToNpc.Decode(frame);
-                    world.Post(new SellToNpcCmd(this, sn.RequestId, sn.MaterialId, sn.Amount));
+                    _world.Post(new SellToNpcCmd(this, sn.RequestId, sn.MaterialId, sn.Amount));
                     break;
                 case RespawnSelect.MsgId:
-                    world.Post(new RespawnSelectCmd(this, RespawnSelect.Decode(frame).OptionId));
+                    _world.Post(new RespawnSelectCmd(this, RespawnSelect.Decode(frame).OptionId));
                     break;
                 case ChatSend.MsgId:
                     var cs = ChatSend.Decode(frame);
-                    world.Post(new ChatSendCmd(this, cs.RequestId, cs.Channel, cs.Text));
+                    _world.Post(new ChatSendCmd(this, cs.RequestId, cs.Channel, cs.Text));
                     break;
-                case LogoutRequest.MsgId: world.Post(new LeaveCmd(this, "LOGOUT")); _cts.Cancel(); break;
+                case JumpRequest.MsgId:
+                    var jr = JumpRequest.Decode(frame);
+                    _world.Post(new JumpCmd(this, jr.RequestId, jr.PortalId));
+                    break;
+                case LogoutRequest.MsgId: _world.Post(new LeaveCmd(this, "LOGOUT")); _cts.Cancel(); break;
                 default:
                     // mensaje desconocido o fuera de lugar: se ignora (jamas rompe la sesion)
                     break;
