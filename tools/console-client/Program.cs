@@ -2,6 +2,12 @@
 // login HTTP contra la api -> ws al game server -> Hello -> volar por el mapa.
 // Sale con 0 si recibio Welcome, EnterMap, spawns y ecos de movimiento que avanzan.
 // Uso: dotnet run -- [usuario] [password]     (default: testbot / dev1234)
+//      API=https://astrion.turname.mx/api dotnet run -- cuenta clave
+//
+// La URL del game server NO se configura: se usa el `game_host` que devuelve el
+// login, igual que hace el cliente de verdad. Asi esta prueba comprueba tambien
+// que ese campo esta bien puesto en produccion, que es justo lo que falla si se
+// despliega sin tocarlo.
 using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text.Json;
@@ -11,7 +17,9 @@ var usuario = args.Length > 0 ? args[0] : "testbot";
 var password = args.Length > 1 ? args[1] : "dev1234";
 
 // ---- 1. login HTTP ----
-using var http = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:5100") };
+var apiBase = Environment.GetEnvironmentVariable("API") ?? "http://127.0.0.1:5100";
+using var http = new HttpClient { BaseAddress = new Uri(apiBase) };
+Console.WriteLine($"api: {apiBase}");
 var loginResp = await http.PostAsJsonAsync("/v1/auth/login", new { username = usuario, password });
 if (!loginResp.IsSuccessStatusCode)
 {
@@ -20,11 +28,13 @@ if (!loginResp.IsSuccessStatusCode)
 }
 var login = await loginResp.Content.ReadFromJsonAsync<JsonElement>();
 var ticket = login.GetProperty("game_ticket").GetString()!;
+var gameHost = login.GetProperty("game_host").GetString()!;
 Console.WriteLine($"login OK: {login.GetProperty("pilot_name")} (cuenta {login.GetProperty("account_id")})");
 
 // ---- 2. conectar y Hello ----
 using var ws = new ClientWebSocket();
-await ws.ConnectAsync(new Uri("ws://127.0.0.1:5200/ws"), CancellationToken.None);
+Console.WriteLine($"game_host: {gameHost}");
+await ws.ConnectAsync(new Uri(gameHost), CancellationToken.None);
 await Enviar(new Hello { ProtocolVersion = 1, GameTicket = ticket }.Encode());
 Console.WriteLine("socket abierto, Hello enviado");
 
