@@ -1,0 +1,10 @@
+{
+  "Urls": "http://127.0.0.1:5210",
+  "ConnectionStrings": {
+    "Default": "Server=127.0.0.1;Port=3306;Database=astrion;User=astrion;Password=CAMBIAR;SslMode=Disabled;AllowPublicKeyRetrieval=true"
+  },
+  "Game": {
+    "_ApiPublicKeyPath": "En el repo esta es una ruta RELATIVA que sube seis carpetas hasta el bin/Debug de la API. En produccion tiene que ser absoluta y apuntar al KeysDir de la API, no a su carpeta de publicacion.",
+    "ApiPublicKeyPath": "/var/lib/astrion/keys/ed25519.pub"
+  }
+}

@@ -1,0 +1,20 @@
+# /etc/systemd/system/astrion-gs.service
+[Unit]
+Description=Astrion GameServer (v1)
+After=network.target mysql.service astrion-api.service
+# La API genera el par de claves Ed25519 la PRIMERA vez que arranca, y este
+# servicio verifica los tickets con la publica. Sin este orden, un servidor
+# recien instalado arranca el juego contra una clave que aun no existe.
+Wants=astrion-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/astrion/gs
+ExecStart=/usr/bin/dotnet /opt/astrion/gs/MexOrbit.GameServer.dll
+Restart=always
+RestartSec=5
+SuccessExitStatus=0 143
+Environment=DOTNET_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
