@@ -17,10 +17,14 @@ var usuario = args.Length > 0 ? args[0] : "testbot";
 var password = args.Length > 1 ? args[1] : "dev1234";
 
 // ---- 1. login HTTP ----
-var apiBase = Environment.GetEnvironmentVariable("API") ?? "http://127.0.0.1:5100";
-using var http = new HttpClient { BaseAddress = new Uri(apiBase) };
+// Sin BaseAddress, y a proposito. Es la trampa clasica de HttpClient: una ruta
+// relativa que empieza por "/" REEMPLAZA el camino de la base, asi que con una
+// base de "https://.../api" el "/api" desaparecia y todo salia 404. En dev nunca
+// se vio porque alli la base no tiene camino. Concatenar es feo y no miente.
+var apiBase = (Environment.GetEnvironmentVariable("API") ?? "http://127.0.0.1:5100").TrimEnd('/');
+using var http = new HttpClient();
 Console.WriteLine($"api: {apiBase}");
-var loginResp = await http.PostAsJsonAsync("/v1/auth/login", new { username = usuario, password });
+var loginResp = await http.PostAsJsonAsync($"{apiBase}/v1/auth/login", new { username = usuario, password });
 if (!loginResp.IsSuccessStatusCode)
 {
     Console.Error.WriteLine($"FALLO login: HTTP {(int)loginResp.StatusCode}");
