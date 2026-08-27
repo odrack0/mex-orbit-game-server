@@ -210,3 +210,52 @@ que conviene conocer**:
 
 **Está sin decidir** si los respawns deberían correr igualmente en mapas vacíos. Hacerlo cuesta poco
 (una pasada barata sobre la cola, sin simular nada más) y quita las dos rarezas de arriba.
+
+## Despliegue
+
+El game server vive en `/opt/astrion/gs` y el mundo se alcanza en
+`wss://astrion-gs.turname.mx/ws`. nginx termina el TLS; el puerto 5210 es interno y nadie de fuera
+lo ve.
+
+```bash
+ssh root@74.208.108.67 'bash -s' < deploy/deploy.sh
+```
+
+**El guion actualiza `mex-orbit-protocol` antes de publicar**, y no es un detalle de comodidad: el
+`.csproj` compila `Messages.g.cs` desde el repo hermano por ruta relativa. Publicar sin refrescarlo
+compila contra un wire viejo, y eso no falla al arrancar — falla como mensajes que el cliente no
+entiende, que es mucho peor de diagnosticar.
+
+### Lo único que nginx tiene que hacer bien
+
+`deploy/astrion-gs.nginx.conf` lleva tres líneas que un proxy normal no lleva, y sin las tres el
+juego no conecta:
+
+| Línea | Sin ella |
+|---|---|
+| `Upgrade` / `Connection: upgrade` | nginx contesta 200 a un handshake de WebSocket y el cliente espera para siempre |
+| `proxy_http_version 1.1` | HTTP/1.0 no sabe de *upgrades* |
+| `proxy_read_timeout 3600s` | el mundo puede pasar minutos callado si el jugador está quieto; con los 60 s por defecto nginx corta la conexión y el jugador ve una desconexión que nadie provocó |
+
+Se comprueba con un `curl` que pida el *upgrade*: tiene que responder **`101 Switching Protocols`**.
+Ojo con `curl -I`, que manda `HEAD` y siempre da 400 — el handshake exige `GET`.
+
+### El orden de arranque importa
+
+`astrion-gs.service` declara `After=astrion-api.service` porque la API **genera el par Ed25519 la
+primera vez que arranca** y este servicio verifica los tickets con la pública. En un servidor recién
+instalado, al revés, el juego arranca contra una clave que aún no existe.
+
+### El cliente de consola es la sonda de producción
+
+`tools/console-client` apunta a donde se le diga y sale con 0 solo si recibió `Welcome`, `EnterMap`,
+spawns y ecos de movimiento que avanzan. Es la prueba de humo real: hace el recorrido entero
+—login HTTP, WSS por nginx, ticket, mundo— con una cuenta cualquiera.
+
+```bash
+API=https://astrion.turname.mx/api dotnet run -- usuario clave
+```
+
+La URL del game server **no se configura**: usa el `game_host` que devuelve el login, igual que el
+cliente de verdad. Es deliberado. Un despliegue puede tener la API perfecta y `GameHost` apuntando
+todavía a `127.0.0.1`; con un parámetro aparte, la prueba pasaría sin tocar el campo que falla.
