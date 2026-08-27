@@ -191,3 +191,22 @@ aparte y una gramatica de texto con separadores sin escapar). `OnChatSend` recor
 `ChatMaxLen`, descarta el vacio y reparte: `GLOBAL` a todos, `FACTION` solo a los de
 la misma faccion. `CLAN` llega en E5. El eco vuelve tambien al emisor: el cliente
 nunca pinta un mensaje que el server no confirmo.
+
+## Consecuencia de los mapas bajo demanda: los NPC no repueblan sin nadie delante
+
+Un mundo sin jugadores **no se tickea** —es lo que evita simular 28 mapas vacíos— y eso incluye la cola
+de respawns. Un mapa que se deja vacío conserva sus bajas: los temporizadores no corren hasta que
+alguien vuelve, y solo entonces empiezan a descontar.
+
+Para el juego puede ser incluso lo deseable (nadie simula lo que nadie ve), pero **tiene dos efectos
+que conviene conocer**:
+
+- Quien vacía un mapa y vuelve enseguida se lo encuentra igual de vacío, y la espera empieza **al
+  llegar**, no al irse.
+- En pruebas repetidas contra un servidor de larga vida, el `1-1` se despuebla: cada pasada del gate
+  se lleva un Vex y nada los repone mientras el bot anda por otros sectores. Un gate que falla con
+  *"no hay ningún vex en el mapa"* casi siempre es esto, no una regresión — se confirma reiniciando el
+  servidor.
+
+**Está sin decidir** si los respawns deberían correr igualmente en mapas vacíos. Hacerlo cuesta poco
+(una pasada barata sobre la cola, sin simular nada más) y quita las dos rarezas de arriba.
