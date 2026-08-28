@@ -10,7 +10,7 @@ using MexOrbit.GameServer.Domain;
 namespace MexOrbit.GameServer.Application;
 
 /// <summary>A que mundo quedo atada la conexion y de quien es.</summary>
-public sealed record HandshakeResult(World TestWorld, long AccountId);
+public sealed record HandshakeResult(World World, long AccountId);
 
 public sealed class Handshake(Universe universe, IPlayerRepository players,
     ISessionRepository sessions, ITicketVerifier verifier, IServerCodec codec, IClock clock,

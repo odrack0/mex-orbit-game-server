@@ -39,13 +39,13 @@ public sealed class WebSocketConnection(WebSocket socket, Handshake handshake, I
 
             var link = DoHandshake(first);
             if (link is null) return;
-            _world = link.TestWorld;
+            _world = link.World;
             AccountId = link.AccountId;
 
             await LoopAsync();
         }
-        catch (OperationCanceledException) { /* cierre pedido por el world */ }
-        catch (WebSocketException) { /* socket caido: el world hara el drop */ }
+        catch (OperationCanceledException) { /* cierre pedido por el mundo */ }
+        catch (WebSocketException) { /* socket caido: el mundo hara el drop */ }
         finally
         {
             // DROPPED (no LOGOUT): una caida abre la ventana de gracia; solo el
