@@ -48,6 +48,9 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         public bool EnBase;                              // dentro del rango de la estacion
         public string AmmoId = "ammo_cel_1";             // municion equipada (E3 la hara elegible)
         public bool Skilled;                             // disparo potenciado (perfil de piloto, E4)
+        /// <summary>Ya se le dijo que su objetivo esta fuera del alcance del laser.
+        /// Se avisa UNA vez por espera, no una vez por tick.</summary>
+        public bool AvisadoFueraDeAlcance;
         /// <summary>Tick en que expira la gracia; long.MaxValue = socket vivo.</summary>
         public long GraceUntilTick = long.MaxValue;
         public bool Desconectado => GraceUntilTick != long.MaxValue;
@@ -174,8 +177,24 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         {
             if (!slot.LaserOn || _tick < slot.NextAttackTick) continue;
             if (!_npcs.TryGetValue(slot.TargetId, out var npc)) { slot.LaserOn = false; continue; }
-            // fuera de rango: el laser ESPERA, no se apaga
-            if (Geometria.Distancia(npc, slot.Entity) > Diales.LaserRange) continue;
+            if (Geometria.Distancia(npc, slot.Entity) > Diales.LaserRange)
+            {
+                // Fuera de rango el laser ESPERA, no se apaga. Pero esperar en
+                // SILENCIO era el peor de los mundos: la pantalla mide 2198x1159
+                // unidades y el laser alcanza 600, asi que mas de la mitad de lo
+                // que se VE esta fuera de tiro. Pinchabas, disparabas, y no pasaba
+                // nada — sin decir por que, y funcionando o no segun DONDE en la
+                // pantalla estuviera el bicho.
+                if (!slot.AvisadoFueraDeAlcance)
+                {
+                    slot.AvisadoFueraDeAlcance = true;
+                    // requestId 0: no es la respuesta a nada que pidiera el
+                    // cliente, es el server contandole algo por su cuenta
+                    Enviar(slot, new Failed(0, ErrorCode.TooFar, "Fuera de alcance: acercate"));
+                }
+                continue;
+            }
+            slot.AvisadoFueraDeAlcance = false;
             slot.NextAttackTick = _tick + EnTicks(Diales.AttackIntervalMs);
             AplicarDanio(slot, npc);
         }

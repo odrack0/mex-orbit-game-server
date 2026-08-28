@@ -23,6 +23,7 @@ public sealed partial class World
             return;
         }
         slot.TargetId = sel.EntityId;
+        slot.AvisadoFueraDeAlcance = false;   // objetivo nuevo, aviso nuevo
         Enviar(slot, new TargetAcquired(npc.Id, npc.Hp, npc.MaxHp, npc.Shield, npc.MaxShield));
     }
 
@@ -31,6 +32,7 @@ public sealed partial class World
         var slot = SlotDe(laser.Port);
         if (slot is null) return;
         slot.LaserOn = !slot.Muerto && laser.Active && slot.TargetId != 0;
+        if (!slot.LaserOn) slot.AvisadoFueraDeAlcance = false;
     }
 
     private void AplicarDanio(PlayerSlot slot, Entity npc)

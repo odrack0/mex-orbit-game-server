@@ -116,6 +116,32 @@ public class CombateTests
     }
 
     [Fact]
+    public void Esperar_fuera_de_alcance_se_dice_UNA_vez()
+    {
+        // la pantalla mide 2198x1159 y el laser alcanza 600: mas de la mitad de lo
+        // que se VE esta fuera de tiro, y esperar en silencio se siente como que
+        // el disparo no funciona
+        var m = SinEstacion().ConManiqui(hp: 100_000, escudo: 0).Construir();
+        var p = m.Entrar(1, danioLaser: 10);
+        var npc = m.PrimerNpc();
+        m.Acercar(p, npc, 900);            // visible (2000) pero fuera de tiro (600)
+        p.Limpiar();
+
+        Disparar(m, p, npc);
+        m.Segundos(3);
+
+        var aviso = Assert.Single(p.Todos<ErrorReply>());
+        Assert.Equal(ErrorCode.TooFar, aviso.Code);
+        Assert.Equal(0ul, aviso.RequestId);   // no responde a nada: lo cuenta el server
+        Assert.Empty(p.Todos<AttackEvent>());
+
+        // y al ponerse a tiro dispara sin volver a encender nada
+        m.Acercar(p, npc, 300);
+        m.Tick();
+        Assert.NotEmpty(p.Todos<AttackEvent>());
+    }
+
+    [Fact]
     public void El_laser_no_se_enciende_sin_objetivo()
     {
         var m = SinEstacion().ConManiqui().Construir();
