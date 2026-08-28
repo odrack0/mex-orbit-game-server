@@ -32,6 +32,7 @@ public sealed class Mundo
     private readonly Dictionary<long, (double X, double Y, uint Velocidad)> _naves = [];
     private readonly Dictionary<long, ulong> _seq = [];
     private bool _combateNpc = true;
+    private RangosDeRelevancia _rangos = RangosDeRelevancia.PorDefecto;
     private int _pingSegundos = 3_600;
     private int _pingFallos = 3;
     private World? _world;
@@ -65,6 +66,19 @@ public sealed class Mundo
     public Mundo ConPrecios(params NpcPrice[] precios) { _precios = [.. precios]; return this; }
     public Mundo SinCombateNpc() { _combateNpc = false; return this; }
 
+    /// <summary>Los rangos de relevancia. Por defecto los de la spec (2000 / 1250
+    /// con 10% de histeresis); una prueba que quiera ver el mapa entero pone
+    /// `SinRelevancia()`.</summary>
+    public Mundo ConRangos(double entidades, double objetos, byte histeresisPct = 10)
+    {
+        _rangos = new RangosDeRelevancia(entidades, objetos, histeresisPct);
+        return this;
+    }
+
+    /// <summary>Rango practicamente infinito: para las pruebas que caracterizan
+    /// OTRA cosa y no quieren que la visibilidad les mueva el suelo.</summary>
+    public Mundo SinRelevancia() => ConRangos(1_000_000, 1_000_000, 0);
+
     /// <summary>Enciende el heartbeat con sus diales reales.</summary>
     public Mundo ConPing(int segundos = 10, int fallos = 3)
     {
@@ -78,7 +92,7 @@ public sealed class Mundo
         // El codec es el DE VERDAD: las pruebas afirman sobre los mismos bytes que
         // recibiria el cliente de Godot, no sobre un doble complaciente.
         _world = new World(Mapa, _spawns, _bias, _receta, _precios, _portales,
-            Bd, Bd, Bd, new ServerCodec(), new RelojFijo(), NullLogger<World>.Instance,
+            Bd, Bd, Bd, new ServerCodec(), new RelojFijo(), _rangos, NullLogger<World>.Instance,
             TickMs, _pingSegundos, _pingFallos, _combateNpc);
         _world.SpawnNpcs();
         return this;

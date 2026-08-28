@@ -18,7 +18,7 @@ namespace MexOrbit.GameServer.Application;
 
 public sealed class Universe(IMapCatalog maps, IGameCatalog catalogo,
     IPlayerRepository jugadores, ISessionRepository sesiones, IEconomyRepository economia,
-    IServerCodec codec, IClock clock, ILoggerFactory logs,
+    IServerCodec codec, IClock clock, RangosDeRelevancia rangos, ILoggerFactory logs,
     int tickMs, int pingIntervalSeconds, int pingMissesToDrop, bool npcCombatEnabled)
 {
     private readonly Dictionary<string, World> _mundos = new();
@@ -47,7 +47,7 @@ public sealed class Universe(IMapCatalog maps, IGameCatalog catalogo,
         var mundo = new World(mapa, catalogo.LoadNpcSpawns(mapa.Id),
             catalogo.LoadZoneBias(mapa.ZoneTier), catalogo.LoadRefineRecipe(),
             catalogo.LoadNpcPrices(), maps.LoadPortals(mapa.Id),
-            jugadores, sesiones, economia, codec, clock, logs.CreateLogger<World>(),
+            jugadores, sesiones, economia, codec, clock, rangos, logs.CreateLogger<World>(),
             tickMs, pingIntervalSeconds, pingMissesToDrop, npcCombatEnabled);
         mundo.SpawnNpcs();
         mundo.Saltar += Saltar;

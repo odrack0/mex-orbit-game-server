@@ -14,3 +14,4 @@ global using ErrorCode = MexOrbit.Protocol.ErrorCode;
 global using DeathCause = MexOrbit.Protocol.DeathCause;
 global using BoxDespawnReason = MexOrbit.Protocol.BoxDespawnReason;
 global using Weapon = MexOrbit.Protocol.Weapon;
+global using DespawnReason = MexOrbit.Protocol.DespawnReason;

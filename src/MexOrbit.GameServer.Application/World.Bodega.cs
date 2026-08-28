@@ -64,7 +64,8 @@ public sealed partial class World
         if (caja.Drops.Count == 0)
         {
             _boxes.Remove(caja.Id);
-            Broadcast(new BoxDespawned(caja.Id, BoxDespawnReason.Collected));
+            AQuienesVenCaja(caja.Id, new BoxDespawned(caja.Id, BoxDespawnReason.Collected));
+            OlvidarCaja(caja.Id);
         }
     }
 

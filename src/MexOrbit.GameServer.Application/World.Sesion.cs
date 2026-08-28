@@ -48,12 +48,17 @@ public sealed partial class World
 
         _players[join.Player.AccountId] = slot;
         SincronizarMundo(slot);
-        Broadcast(new EntitySpawned(hero));          // los demas ven llegar al heroe
+        // los demas lo ven llegar por relevancia, en este mismo tick
         log.LogInformation("cuenta {id} ({nombre}) entro al mapa {code}",
             join.Player.AccountId, join.Player.PilotName, map.Code);
     }
 
-    /// <summary>Estado completo del mundo para un jugador: al entrar y al reconectar.</summary>
+    /// <summary>El mundo que le toca a un jugador al entrar y al reconectar.
+    ///
+    /// Ya NO es el mapa entero. El mobiliario —limites, estacion, portales,
+    /// precios— si viaja completo, porque es del mapa y no de nadie; las
+    /// entidades y las cajas entran por relevancia, asi que se manda lo que este
+    /// en rango AHORA y el resto va llegando conforme se vuela hacia ello.</summary>
     private void SincronizarMundo(PlayerSlot slot)
     {
         // los portales van completos aqui: son mobiliario del mapa, no entidades
@@ -61,12 +66,7 @@ public sealed partial class World
         Enviar(slot, new PricesPublished(npcPrices));
         Enviar(slot, new EntitySpawned(slot.Entity));
         Enviar(slot, HeroStatsDe(slot));
-        foreach (var otro in _players.Values)
-            if (otro != slot)
-                Enviar(slot, new EntitySpawned(otro.Entity));
-        foreach (var npc in _npcs.Values) Enviar(slot, new EntitySpawned(npc));
-        foreach (var caja in _boxes.Values)
-            Enviar(slot, new BoxSpawned(caja.Id, "from_ship", caja.X, caja.Y));
+        SembrarRelevancia(slot);
         EnviarAlmacen(slot);
     }
 
@@ -156,7 +156,7 @@ public sealed partial class World
         slot.Entity.TargetX = Math.Clamp(move.TargetX, 0, map.BoundsX);
         slot.Entity.TargetY = Math.Clamp(move.TargetY, 0, map.BoundsY);
         // eco autoritativo a TODOS, heroe incluido: contra esto se reconcilia el cliente
-        Broadcast(new EntityMoved(slot.Entity));
+        AQuienesVen(slot.Entity.Id, new EntityMoved(slot.Entity));
     }
 
     private void OnPong(PongCmd pong)

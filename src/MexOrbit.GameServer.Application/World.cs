@@ -19,7 +19,7 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     List<MaterialBias> zoneBias, RefineRecipe? refineRecipe, List<NpcPrice> npcPrices,
     List<PortalInfo> portals,
     IPlayerRepository players, ISessionRepository sessions, IEconomyRepository economy,
-    IServerCodec codec, IClock clock, ILogger<World> log,
+    IServerCodec codec, IClock clock, RangosDeRelevancia rangos, ILogger<World> log,
     int tickMs, int pingIntervalSeconds, int pingMissesToDrop, bool npcCombatEnabled = true)
 {
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
@@ -54,6 +54,10 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         /// <summary>Destruido y esperando a elegir reaparicion: ni vuela ni dispara.</summary>
         public bool Muerto;
         public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
+        /// <summary>Lo que el CLIENTE de este jugador cree que existe. La
+        /// relevancia es un diff contra estos dos conjuntos.</summary>
+        public readonly HashSet<ulong> Vistas = [];
+        public readonly HashSet<ulong> CajasVistas = [];
     }
 
     private readonly Dictionary<long, PlayerSlot> _players = new();     // account_id -> slot
@@ -131,6 +135,10 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         ExpirarCajas();
         ReaparecerNpcs();
         BarrerGraciasAgotadas();
+        // el diff de visibilidad va al FINAL: para entonces todo se movio, se
+        // murio y se reaparecio, asi que se calcula una sola vez sobre el
+        // estado ya estable del tick
+        ActualizarRelevancia();
         Heartbeat();
         WriteBehind();
     }
@@ -177,7 +185,8 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         foreach (var caja in _boxes.Values.Where(b => _tick >= b.ExpiraTick).ToList())
         {
             _boxes.Remove(caja.Id);
-            Broadcast(new BoxDespawned(caja.Id, BoxDespawnReason.Expired));
+            AQuienesVenCaja(caja.Id, new BoxDespawned(caja.Id, BoxDespawnReason.Expired));
+            OlvidarCaja(caja.Id);
         }
     }
 
@@ -186,7 +195,9 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         foreach (var (cuando, info, id) in _respawns.Where(r => _tick >= r.Tick).ToList())
         {
             _respawns.Remove((cuando, info, id));
-            Broadcast(new EntitySpawned(SpawnNpc(info, id)));
+            // no se anuncia aqui: quien lo tenga cerca lo recibira en el paso de
+            // relevancia de este mismo tick
+            SpawnNpc(info, id);
         }
     }
 
@@ -245,16 +256,11 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
 
     private void Enviar(IClientPort port, ServerEvent evento) => port.Send(codec.Encode(evento));
 
-    /// <summary>Se codifica UNA vez y el MISMO array viaja a todos: sacar el
-    /// protocolo del dominio no puede costar N serializaciones por evento.</summary>
-    private void Broadcast(ServerEvent evento)
+    private void Despawn(ulong entityId, DespawnReason reason)
     {
-        var frame = codec.Encode(evento);
-        foreach (var slot in _players.Values) slot.Port.Send(frame);
+        AQuienesVen(entityId, new EntityDespawned(entityId, reason));
+        OlvidarEntidad(entityId);
     }
-
-    private void Despawn(ulong entityId, DespawnReason reason) =>
-        Broadcast(new EntityDespawned(entityId, reason));
 
     private PlayerSlot? SlotDe(IClientPort port) =>
         _players.Values.FirstOrDefault(s => ReferenceEquals(s.Port, port));

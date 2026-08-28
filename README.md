@@ -38,7 +38,8 @@ Los **Guidelines generales del juego** (`mex-orbit-docs`): toda mecánica implem
 
 Vertical slice E2/I7 jugable: mapas bajo demanda, combate, NPCs con IA portada del legado,
 bodega y cajas, base con descarga y venta, reconexión con ventana de gracia, chat y salto de
-sector. Repartido en cinco proyectos (ver **Arquitectura**) con 70 pruebas de caracterización.
+sector, con relevancia por rango. Repartido en cinco proyectos (ver **Arquitectura**) y 83
+pruebas de caracterización.
 
 ## Arquitectura
 
@@ -97,15 +98,68 @@ roja si.
 dotnet test MexOrbit.GameServer.slnx
 ```
 
-**70 pruebas, ~80 ms, sin MySQL y sin socket.** Son de *caracterizacion*: se escribieron
+**83 pruebas, ~100 ms, sin MySQL y sin socket.** Son de *caracterizacion*: se escribieron
 contra el codigo ANTES de repartirlo en capas, para que el refactor no pudiera cambiar el
 juego sin que nadie se enterara. Fijan el escudo antes que el casco, la cadencia de 500 ms,
 la maquina de tres estados de la IA, la huida del Vorax, el DMZ de la estacion, la recogida
-parcial, la ventana de gracia, el heartbeat, el salto y el chat.
+parcial, la ventana de gracia, el heartbeat, el salto, el chat y la relevancia por rango.
 
 El banco (`tests/.../Mundo.cs`) arma un `World` de verdad con la BD y el socket sustituidos
 por dobles, y **el codec autentico**: lo que las pruebas afirman son los mismos bytes que
 recibiria el cliente de Godot.
+
+## Relevancia por rango
+
+El cliente **solo sabe de lo que tiene cerca**. Antes el mundo difundia todo a todos —los 54
+bichos del 1-1, sus movimientos y cada caja, a cada jugador este donde este— y eso no escala:
+con 29 mapas el trafico crece con el producto de entidades por jugadores, no con lo que se ve.
+
+| Que | Rango | De donde sale |
+|---|---|---|
+| Naves y NPCs | 2000 | `server_setting.render_range_entities` |
+| Cajas | 1250 | `server_setting.render_range_objects` |
+| Portales, estacion y limites | — | **No entran por relevancia**: viajan completos en `EnterMap`, son mobiliario del mapa |
+
+Cada jugador lleva el conjunto de lo que **su cliente cree que existe**; en cada tick se calcula
+el diff y se manda lo que entra (`EntitySpawn`) y lo que sale (`EntityDespawn` con motivo
+`RANGE`). El motivo **viaja**: para el cliente no es lo mismo que algo se haya ido de la pantalla
+a que se lo hayan reventado.
+
+**El objetivo seleccionado nunca sale de relevancia** (spec del protocolo). Si no, perseguir a un
+Vorax que huye seria verlo evaporarse justo cuando importa, con el server diciendo todavia que lo
+tienes fichado. Y al reves: **no se puede fichar lo que no se ve** — el cliente solo puede pinchar
+lo que recibio, asi que esto no cambia nada jugando limpio; lo que cierra es el atajo de mandar un
+id cualquiera para que el server te informe de un bicho al otro lado del mapa.
+
+**Lo que entra en rango volando trae su rumbo.** `EntitySpawn` no lleva destino, asi que a un
+spawn de una nave en pleno vuelo le sigue su `EntityMove`. Sin eso apareceria congelada hasta su
+siguiente movimiento — que puede tardar segundos, o no llegar nunca si ya iba camino de su
+destino. Es el mismo remate que hacia el legado (`ShipCreate` + `MoveCommand` con el tiempo
+restante).
+
+Tres cosas se hacen **distinto** del server legado, a proposito:
+
+1. **Se difunde a quien ME VE, no a quien VEO YO.** El legado recorria el conjunto del emisor
+   (`SendCommandToInRangePlayers` sobre sus propios `InRangeCharacters`). Con rangos simetricos
+   coincide, pero en cuanto uno tenia el rango doblado —la skill Recon— mandaba sus movimientos a
+   gente que nunca habia recibido su `ShipCreate`: el cliente recibia un Move de una nave que para
+   el no existia.
+2. **Hay histeresis.** El legado tenia un umbral y lo evaluaba cada tick, asi que un jugador
+   parado justo en el borde generaba un spawn y un despawn **cada 84 ms**. Aqui se entra a 2000 y
+   no se sale hasta 2200.
+3. **Solo observan los jugadores.** El legado calculaba el conjunto para todos los personajes,
+   NPC contra NPC incluidos —54x54 comparaciones— para alimentar a una IA que aqui ya usa
+   `npc_catalog.aggro_radius` y no necesita el conjunto para nada.
+
+**Los ids se reutilizan.** Un NPC que cae vuelve con el MISMO `entity_id`, asi que al morir hay que
+olvidarlo del conjunto de todos: si no, reaparecia en el mapa sin que su cliente se enterase nunca.
+
+**Coste.** Un recorrido por tick de jugadores x (NPCs + jugadores). Con 54 bichos y los jugadores
+de un sector es despreciable, y es lo mismo que hacia el legado a 84 ms. Si un mapa se llena, el
+siguiente paso es una rejilla espacial — no bajar la cadencia, que es lo que se nota.
+
+**Consecuencia visible:** el minimapa deja de mostrar el sector entero. Es fiel al original —el
+minimapa es tu radar, no un mapa de calor omnisciente— y se decidio a proposito.
 
 ## Diales
 
@@ -134,6 +188,9 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | Daño del NPC | BD `npc_catalog.damage` | 25-85 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
 | Huida | BD `npc_catalog.flee_hp_pct` | 30 solo en el Vorax | Debajo de ese % de casco, el bicho se larga |
 | Combate NPC->jugador | BD `server_setting.npc_combat_enabled` | **0 (apagado)** | Apagado, los NPC persiguen pero no disparan |
+| Relevancia de entidades | BD `server_setting.render_range_entities` | 2000 | A que distancia el cliente empieza a recibir naves y NPCs |
+| Relevancia de cajas | BD `server_setting.render_range_objects` | 1250 | Lo mismo para las cajas: mobiliario menudo, rango mas corto |
+| Histeresis de relevancia | BD `server_setting.render_range_hysteresis_pct` | 10 % | Margen extra para SALIR; 0 = un solo umbral, como el legado |
 | `HuidaMs` / `HuidaDistancia` | `Domain/Diales.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
 | `JumpRange` | `Domain/Diales.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
 | `MargenDelMapa` | `Domain/Diales.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |

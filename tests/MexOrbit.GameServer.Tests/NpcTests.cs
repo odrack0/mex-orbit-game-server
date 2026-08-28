@@ -23,8 +23,11 @@ public class NpcTests
     [Fact]
     public void Sin_presa_y_quieto_el_NPC_cruza_el_mapa()
     {
-        var m = SinEstacion().ConNpc(Bicho(velocidad: 200)).Construir();
-        var p = m.Entrar(1);
+        // mapa donde el bicho cae siempre dentro del rango de relevancia: lo que
+        // se caracteriza aqui es COMO elige rumbo, no si se ve
+        var m = new Mundo().ConMapa(3_000, 3_000, 1, 1, 0)
+            .ConNpc(Bicho(velocidad: 200)).Construir();
+        var p = m.Entrar(1, datos: m.Piloto(1, x: 1_500, y: 1_500));
         var npc = m.PrimerNpc();
 
         // NO se limpia el buffer: el bicho elige rumbo en su PRIMER pensamiento,

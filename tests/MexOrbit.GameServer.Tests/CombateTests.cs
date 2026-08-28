@@ -18,6 +18,9 @@ public class CombateTests
         var m = SinEstacion().ConManiqui(hp: 1_000, escudo: 500).Construir();
         var p = m.Entrar(1);
         var npc = m.PrimerNpc();
+        // hay que VERLO para poder ficharlo: la relevancia por rango tiene sus
+        // propias pruebas, aqui solo interesa que llegan las dos barras
+        m.Acercar(p, npc, 100);
 
         m.W.Post(new SelectTargetCmd(p, npc.Id));
         m.Tick();

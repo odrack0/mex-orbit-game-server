@@ -103,7 +103,7 @@ public sealed partial class World
         if (npc.Moving) return;
         npc.TargetX = PuntoDelMapaX();
         npc.TargetY = PuntoDelMapaY();
-        Broadcast(new EntityMoved(npc));
+        AQuienesVen(npc.Id, new EntityMoved(npc));
     }
 
     private void Aproximarse(Entity npc, NpcSpawnInfo info, NpcAi ai)
@@ -116,7 +116,7 @@ public sealed partial class World
             Diales.AproximacionRadio, _rng.NextDouble() * Math.PI * 2, map);
         npc.TargetX = x;
         npc.TargetY = y;
-        Broadcast(new EntityMoved(npc));
+        AQuienesVen(npc.Id, new EntityMoved(npc));
         ai.Estado = NpcAiState.EsperandoQueSeMueva;
     }
 
@@ -144,7 +144,7 @@ public sealed partial class World
         var (x, y) = Combate.RumboDeHuida(npc, presa?.Entity, map, _rng.NextDouble);
         npc.TargetX = x;
         npc.TargetY = y;
-        Broadcast(new EntityMoved(npc));
+        AQuienesVen(npc.Id, new EntityMoved(npc));
 
         ai.TargetId = 0;
         ai.Atacando = false;
@@ -197,7 +197,7 @@ public sealed partial class World
         var danio = Combate.ConVariacion(info.Damage, _rng.Next);
         Combate.Encajar(slot.Entity, danio);
 
-        Broadcast(new AttackLanded(npc.Id, slot.Entity.Id, Weapon.Laser, danio,
+        AQuienesVen(npc.Id, slot.Entity.Id, new AttackLanded(npc.Id, slot.Entity.Id, Weapon.Laser, danio,
             slot.Entity.Hp, slot.Entity.Shield, false, "ammo_cel_1", false));
         Enviar(slot, HeroStatsDe(slot));
 

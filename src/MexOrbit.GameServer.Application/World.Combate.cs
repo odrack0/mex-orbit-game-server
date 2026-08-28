@@ -10,7 +10,13 @@ public sealed partial class World
     {
         var slot = SlotDe(sel.Port);
         if (slot is null) return;
-        if (sel.EntityId == 0 || !_npcs.TryGetValue(sel.EntityId, out var npc))
+        // No se puede fichar lo que no se ve. El cliente solo puede pinchar sobre
+        // lo que recibio, asi que en el juego limpio esto no cambia nada; lo que
+        // cierra es el atajo de mandar un id cualquiera para que el server te
+        // mantenga en relevancia —y te informe de— un bicho al otro lado del mapa.
+        if (sel.EntityId == 0
+            || !_npcs.TryGetValue(sel.EntityId, out var npc)
+            || !slot.Vistas.Contains(sel.EntityId))
         {
             slot.TargetId = 0;
             slot.LaserOn = false;
@@ -40,9 +46,9 @@ public sealed partial class World
         if (npc.Moving)
         {
             npc.Detener();
-            Broadcast(new EntityMoved(npc));
+            AQuienesVen(npc.Id, new EntityMoved(npc));
         }
-        Broadcast(new AttackLanded(slot.Entity.Id, npc.Id, Weapon.Laser, danio,
+        AQuienesVen(slot.Entity.Id, npc.Id, new AttackLanded(slot.Entity.Id, npc.Id, Weapon.Laser, danio,
             npc.Hp, npc.Shield, false,
             // el aspecto del disparo: la municion equipada y si va potenciada.
             // En el slice hay una sola municion y el perfil de piloto llega en E4,
@@ -62,7 +68,10 @@ public sealed partial class World
             s.TargetId = 0;
             s.LaserOn = false;
         }
-        Broadcast(new EntityDestroyed(npc.Id, slot.Entity.Id));
+        AQuienesVen(npc.Id, new EntityDestroyed(npc.Id, slot.Entity.Id));
+        // el cliente ya borro el nodo: hay que olvidarlo o su reaparicion —con el
+        // MISMO id— no le llegaria nunca
+        OlvidarEntidad(npc.Id);
         _respawns.Add((_tick + info.RespawnSeconds * 1000 / (uint)tickMs, info, npc.Id));
 
         // recompensa: credits relativos + ledger (la api jamas toca esto en sesion)
@@ -90,7 +99,7 @@ public sealed partial class World
             ExpiraTick = _tick + EnTicks(Diales.BoxTtlMs),
         };
         _boxes[caja.Id] = caja;
-        Broadcast(new BoxSpawned(caja.Id, "from_ship", caja.X, caja.Y));
+        // no se anuncia aqui: quien la tenga cerca la recibe en el paso de relevancia
         return caja;
     }
 
@@ -105,7 +114,8 @@ public sealed partial class World
         slot.Entity.Detener();
         foreach (var ai in _npcAi.Values.Where(a => a.TargetId == slot.Entity.Id)) ai.Olvidar();
 
-        Broadcast(new EntityDestroyed(slot.Entity.Id, asesino.Id));
+        AQuienesVen(slot.Entity.Id, new EntityDestroyed(slot.Entity.Id, asesino.Id));
+        OlvidarEntidad(slot.Entity.Id);
 
         if (slot.Cargo.Count > 0)
         {
@@ -133,7 +143,9 @@ public sealed partial class World
         slot.Entity.X = map.StationX;
         slot.Entity.Y = map.StationY;
         slot.Entity.Detener();
-        Broadcast(new EntitySpawned(slot.Entity));
+        // solo a el: su cliente borro la nave al recibir EntityDestroyed. Los demas
+        // la vuelven a recibir por relevancia, ya en la base
+        Enviar(slot, new EntitySpawned(slot.Entity));
         Enviar(slot, HeroStatsDe(slot));
         ActualizarRangoBase(slot);
         GuardarNave(slot);

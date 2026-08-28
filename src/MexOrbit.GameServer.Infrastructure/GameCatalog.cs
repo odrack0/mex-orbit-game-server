@@ -77,4 +77,14 @@ public sealed class ServerSettings(string connectionString)
         if (v is null) return porDefecto;
         return v is "1" or "true" or "TRUE" or "True";
     }
+
+    /// <summary>Escalar entero de `server_setting`. Un valor corrupto vale lo
+    /// mismo que una fila ausente: el default, y el server arranca igual.</summary>
+    public int LoadIntSetting(string key, int porDefecto)
+    {
+        using var db = Open();
+        var v = db.ExecuteScalar<string?>(
+            "SELECT value FROM server_setting WHERE setting_key = @key", new { key });
+        return int.TryParse(v, out var n) ? n : porDefecto;
+    }
 }

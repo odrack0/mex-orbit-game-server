@@ -8,6 +8,7 @@
 // api, sesion unica. Transporte dev: ws:// en 5200 (TLS lo aporta la
 // infraestructura en prod: wss://).
 using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.GameServer.Infrastructure;
 using MexOrbit.GameServer.Net;
 using MexOrbit.GameServer.Protocol;
@@ -36,14 +37,22 @@ var codec = new ServerCodec();
 var reloj = new SystemClock();
 var verificador = new Ed25519TicketVerifier(pubKeyPath);
 
-// dial de JUEGO, no de despliegue: vive en server_setting con su auditoria
+// diales de JUEGO, no de despliegue: viven en server_setting con su auditoria
 var npcCombat = ajustes.LoadBoolSetting("npc_combat_enabled", true);
+// A que distancia el cliente empieza —y deja— de saber que algo existe. La spec
+// del protocolo fija los valores iniciales y dice que son calibrables en BD; si
+// las filas faltan se usan los de respaldo y el server arranca igual.
+var rangos = new RangosDeRelevancia(
+    ajustes.LoadIntSetting("render_range_entities", (int)RangosDeRelevancia.PorDefecto.Entidades),
+    ajustes.LoadIntSetting("render_range_objects", (int)RangosDeRelevancia.PorDefecto.Objetos),
+    (byte)ajustes.LoadIntSetting("render_range_hysteresis_pct",
+        RangosDeRelevancia.PorDefecto.HisteresisPct));
 
 // ─── la simulacion ──────────────────────────────────────────────────────────
 // Los mapas se levantan cuando alguien entra, no al arrancar: 29 mapas serian
 // 29 consultas y 29 poblaciones de NPC antes de que exista un solo jugador.
-var universo = new Universe(mapas, catalogo, jugadores, sesiones, economia, codec, reloj, logs,
-    tickMs, pingInterval, pingMisses, npcCombat);
+var universo = new Universe(mapas, catalogo, jugadores, sesiones, economia, codec, reloj, rangos,
+    logs, tickMs, pingInterval, pingMisses, npcCombat);
 var mapa = universo.Inicial().Mapa;
 var handshake = new Handshake(universo, jugadores, sesiones, verificador, codec, reloj,
     protocolVersion, tickMs);
@@ -66,4 +75,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", map = mapa.Code }));
 
 app.Logger.LogInformation("game server listo: entrada {code} ({x}x{y}), tick {tick} ms, clave publica {key}",
     mapa.Code, mapa.BoundsX, mapa.BoundsY, tickMs, pubKeyPath);
+// se anuncian como el resto de diales de BD: cambiarlos pide reiniciar, y el log
+// de arranque es donde se comprueba con que numeros esta corriendo de verdad
+app.Logger.LogInformation("relevancia por rango: entidades {e} u · cajas {c} u · histeresis {h}%",
+    rangos.Entidades, rangos.Objetos, rangos.HisteresisPct);
 app.Run();

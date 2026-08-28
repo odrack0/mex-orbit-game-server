@@ -33,6 +33,7 @@ public interface IGameCatalog
 public interface IServerSettings
 {
     bool LoadBoolSetting(string key, bool porDefecto);
+    int LoadIntSetting(string key, int porDefecto);
 }
 
 /// <summary>El jugador y su nave: lo que se lee al entrar y la unica escritura

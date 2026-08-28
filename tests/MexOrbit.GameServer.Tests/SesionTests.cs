@@ -11,8 +11,11 @@ public class SesionTests
     private static Mundo Vacio() => new Mundo().ConMapa(20_800, 12_800, 10_000, 6_000, 1_500);
 
     [Fact]
-    public void Al_entrar_se_recibe_el_mundo_completo()
+    public void Al_entrar_llega_el_mobiliario_del_mapa_y_el_heroe()
     {
+        // El MOBILIARIO viaja completo —limites, estacion, portales, precios—
+        // porque es del mapa y no de nadie. Las entidades NO: entran por rango,
+        // y de eso se ocupa RelevanciaTests.
         var m = Vacio().ConManiqui().Construir();
         var p = m.Entrar(1);
 
@@ -21,9 +24,7 @@ public class SesionTests
         Assert.Equal(20_800u, entrada.LimitsX);
         Assert.Equal(10_000u, entrada.StationX);
         Assert.Equal(1_500u, entrada.StationRange);
-        // el heroe, el bicho, los precios y sus barras
         Assert.Contains(p.Todos<EntitySpawn>(), e => e.EntityId == 1 && e.Kind == EntityKind.Player);
-        Assert.Contains(p.Todos<EntitySpawn>(), e => e.Kind == EntityKind.Npc);
         Assert.True(p.Recibio<NpcPrices>());
         Assert.True(p.Recibio<HeroStats>());
     }
