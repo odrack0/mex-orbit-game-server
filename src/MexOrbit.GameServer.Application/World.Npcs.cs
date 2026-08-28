@@ -30,9 +30,11 @@ public sealed partial class World
             MaxHp = spawn.MaxHp,
             Shield = spawn.MaxShield,
             MaxShield = spawn.MaxShield,
-            X = PuntoDelMapaX(),
-            Y = PuntoDelMapaY(),
+            X = 0, Y = 0,
         };
+        var (x, y) = PuntoDeAparicion();
+        e.X = x;
+        e.Y = y;
         e.Detener();
         _npcs[e.Id] = e;
         _npcInfo[e.Id] = spawn;
@@ -41,6 +43,30 @@ public sealed partial class World
             ProximoPensamientoTick = _tick + _rng.Next(0, EnTicks(Diales.AiThinkMs)),
         };
         return e;
+    }
+
+    /// <summary>Donde nace —o renace— un bicho: un punto del mapa que NO le caiga
+    /// encima a nadie.
+    ///
+    /// Un NPC reaparece 30 s despues de morir en un punto sorteado, y el sorteo
+    /// no miraba a nadie: podia materializarse a 500 unidades de un jugador, en
+    /// mitad de su pantalla y de la nada. Ahora nace fuera del rango de
+    /// relevancia de todos, asi que siempre entra en escena volando desde fuera.
+    ///
+    /// Se intenta unas cuantas veces y se acepta lo que salga: en un mapa
+    /// pequeño —o lleno de gente— puede no existir ningun punto libre, y un
+    /// bicho que no reaparece seria peor que uno que aparece cerca.</summary>
+    private (double X, double Y) PuntoDeAparicion()
+    {
+        (double X, double Y) punto = (0, 0);
+        for (var intento = 0; intento < 12; intento++)
+        {
+            punto = (PuntoDelMapaX(), PuntoDelMapaY());
+            if (_players.Values.All(s =>
+                    Geometria.Distancia(punto.X, punto.Y, s.Entity.X, s.Entity.Y) > rangos.Entidades))
+                return punto;
+        }
+        return punto;
     }
 
     /// <summary>Los limites salen del MAPA. El legado los llevaba a mano

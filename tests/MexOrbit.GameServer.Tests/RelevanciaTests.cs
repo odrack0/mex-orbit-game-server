@@ -230,6 +230,33 @@ public class RelevanciaTests
         Assert.Contains(p.Todos<BoxSpawn>(), b => b.BoxId == caja.BoxId);
     }
 
+    [Fact]
+    public void Un_NPC_no_reaparece_encima_de_nadie()
+    {
+        // Reaparecia en un punto sorteado sin mirar a nadie: podia materializarse
+        // a 500 unidades, en mitad de la pantalla y de la nada.
+        var m = Sector().ConNpc(new NpcSpawnInfo(1, "vex", "Vex", 100, 0, 0, 50, false, 0, 0,
+            30, 1, 0, 0, 0, 0, 0)).Construir();
+        var npc = m.PrimerNpc();
+        var npcId = npc.Id;
+        var p = m.Entrar(1, danioLaser: 100, datos: m.Piloto(1,
+            x: (uint)Math.Round(npc.X + 200), y: (uint)Math.Round(npc.Y)));
+        m.W.Post(new SelectTargetCmd(p, npcId));
+        m.W.Post(new LaserToggleCmd(p, true));
+        m.Tick();
+        p.Limpiar();
+
+        m.Segundos(31);
+
+        // nace fuera de relevancia: entra en escena volando desde fuera, no
+        // apareciendo en las narices del jugador
+        var nave = m.W.NaveDe(1)!;
+        var vuelto = m.W.NpcsVivos[npcId];
+        var dist = Geometria.Distancia(nave, vuelto);
+        Assert.True(dist > 2_000, $"reaparecio a {dist:F0} u del jugador");
+        Assert.Empty(p.Todos<EntitySpawn>().Where(e => e.EntityId == npcId));
+    }
+
     // ─── ids que se reutilizan ──────────────────────────────────────────────
 
     [Fact]

@@ -112,6 +112,8 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
 
     // ─── ventanas de inspeccion (solo para las pruebas; `internal`, no API) ──
     internal IReadOnlyDictionary<ulong, Entity> NpcsVivos => _npcs;
+    internal Entity? NaveDe(long accountId) =>
+        _players.TryGetValue(accountId, out var s) ? s.Entity : null;
     internal IReadOnlyCollection<ulong> CajasVivas => _boxes.Keys;
     internal long TickActual => _tick;
 
