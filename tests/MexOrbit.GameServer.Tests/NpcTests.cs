@@ -158,6 +158,82 @@ public class NpcTests
         Assert.Contains(p.All<AttackEvent>(), a => a.AttackerId >= 1_000_000);
     }
 
+    // ─── el santuario ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void Wandering_never_targets_the_sanctuary()
+    {
+        // el circulo de la estacion —el que el cliente PINTA— no es destino de
+        // nadie: ni de vagabundeo, ni de nacimiento
+        var m = new TestWorld().WithMap(4_000, 4_000, 2_000, 2_000, 1_500)
+            .WithNpc(Beast(speed: 300)).Build();
+        var p = m.Enter(1, data: m.Pilot(1, x: 2_000, y: 2_000));
+
+        m.Seconds(30);
+
+        var intoSanctuary = p.All<EntityMove>()
+            .Where(e => e.EntityId >= 1_000_000)
+            .Where(e => Math.Sqrt(Math.Pow((double)e.TargetX - 2_000, 2)
+                                  + Math.Pow((double)e.TargetY - 2_000, 2)) < 1_500)
+            .ToList();
+        Assert.Empty(intoSanctuary);
+    }
+
+    [Fact]
+    public void A_beast_that_ends_up_inside_the_sanctuary_leaves_it()
+    {
+        // puede acabar dentro por inercia (un tramo que cruzaba de refilon); su
+        // primer pensamiento ahi dentro es salir
+        var m = new TestWorld().WithMap(4_000, 4_000, 2_000, 2_000, 1_500)
+            .WithNpc(Beast(speed: 300)).Build();
+        var p = m.Enter(1, data: m.Pilot(1, x: 2_000, y: 2_000));
+        var npc = m.FirstNpc();
+        // se le planta dentro a la fuerza, como lo dejaria la inercia de un tramo
+        npc.X = 2_100;
+        npc.Y = 2_000;
+        npc.Stop();
+        p.Clear();
+
+        m.Seconds(2);
+
+        var exit = p.All<EntityMove>().Last(e => e.EntityId == npc.Id);
+        var dist = Math.Sqrt(Math.Pow((double)exit.TargetX - 2_000, 2)
+                             + Math.Pow((double)exit.TargetY - 2_000, 2));
+        Assert.True(dist >= 1_500, $"su destino sigue dentro: a {dist:F0} del centro");
+    }
+
+    [Fact]
+    public void A_provoked_beast_does_cross_the_sanctuary()
+    {
+        // la unica llave del circulo es la provocacion: si TU abres fuego, tu
+        // agresor entra a por ti (la misma regla del DMZ)
+        var m = new TestWorld().WithMap(4_000, 4_000, 2_000, 2_000, 1_500)
+            .WithNpc(Beast(hp: 100_000, damage: 10, aggro: 900, speed: 300)).Build();
+        // La presa a 1000 del centro: su circulo de aproximacion (300) queda
+        // ENTERO dentro del santuario, asi que el destino del perseguidor no
+        // puede caer fuera por sorteo. Y el bicho fuera del circulo pero A TIRO
+        // (560 < 600): el bicho nace a >=1500 del centro y desde alli seria
+        // imposible provocarlo siquiera.
+        var p = m.Enter(1, laserDamage: 10, shield: 0,
+            data: m.Pilot(1, hp: 100_000, x: 3_000, y: 2_000));
+        var npc = m.FirstNpc();
+        npc.X = 3_560;
+        npc.Y = 2_000;
+        npc.Stop();
+
+        m.W.Post(new SelectTargetCmd(p, npc.Id));
+        m.W.Post(new LaserToggleCmd(p, true));
+        m.Seconds(3);
+        p.Clear();
+
+        m.Seconds(12);
+
+        // el agresor termina DENTRO del circulo, junto a su presa
+        var last = p.All<EntityMove>().LastOrDefault(e => e.EntityId == npc.Id);
+        var dist = Geometry.Distance(npc.X, npc.Y, 2_000, 2_000);
+        Assert.True(dist < 1_500, $"no entro: sigue a {dist:F0} del centro");
+    }
+
     // ─── los cobardes ───────────────────────────────────────────────────────
 
     [Fact]

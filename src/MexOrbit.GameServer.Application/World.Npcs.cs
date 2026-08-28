@@ -62,11 +62,25 @@ public sealed partial class World
         for (var attempt = 0; attempt < 12; attempt++)
         {
             point = (MapPointX(), MapPointY());
+            if (_safe.Inside(point.X, point.Y)) continue;   // en santuario no se nace
             if (_players.Values.All(s =>
                     Geometry.Distance(point.X, point.Y, s.Entity.X, s.Entity.Y) > ranges.Entities))
                 return point;
         }
         return point;
+    }
+
+    /// <summary>Un destino de vagabundeo: cualquier punto del mapa MENOS los
+    /// santuarios. Con la estacion cubriendo ~2% del 1-1, doce intentos casi
+    /// nunca fallan — y si fallaran, el destino sale empujado fuera.</summary>
+    private (double X, double Y) WanderPoint()
+    {
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            var point = (X: MapPointX(), Y: MapPointY());
+            if (!_safe.Inside(point.X, point.Y)) return point;
+        }
+        return _safe.NearestExit(MapPointX(), MapPointY(), Dials.MapMargin, _rng.NextDouble);
     }
 
     /// <summary>Los limites salen del MAPA. El legado los llevaba a mano
@@ -90,6 +104,19 @@ public sealed partial class World
         if (_tick >= ai.NextThinkTick)
         {
             ai.NextThinkTick = _tick + ToTicks(Dials.AiThinkMs);
+            // El santuario expulsa. Un bicho puede acabar dentro por inercia —el
+            // tramo que cruzaba de refilon, la presa que lo arrastro hasta el
+            // borde— y su primer pensamiento ahi dentro es SALIR, este en el
+            // estado que este. La unica llave es la provocacion: al agresor de un
+            // jugador el circulo no lo protege de nada (regla del DMZ).
+            if (!ai.Provoked && _safe.Inside(npc.X, npc.Y))
+            {
+                var (ex, ey) = _safe.NearestExit(npc.X, npc.Y, Dials.MapMargin, _rng.NextDouble);
+                npc.TargetX = Math.Clamp(ex, 0, map.BoundsX);
+                npc.TargetY = Math.Clamp(ey, 0, map.BoundsY);
+                ToThoseWhoSee(npc.Id, new EntityMoved(npc));
+                return;
+            }
             switch (ai.State)
             {
                 case NpcAiState.Searching: Search(npc, info, ai); break;
@@ -127,8 +154,9 @@ public sealed partial class World
         // sin presa y quieto: a cruzar el mapa. Esto es lo que lo hace estar VIVO
         // en vez de girar sobre su propio eje.
         if (npc.Moving) return;
-        npc.TargetX = MapPointX();
-        npc.TargetY = MapPointY();
+        var (wx, wy) = WanderPoint();
+        npc.TargetX = wx;
+        npc.TargetY = wy;
         ToThoseWhoSee(npc.Id, new EntityMoved(npc));
     }
 
@@ -140,8 +168,12 @@ public sealed partial class World
         // bichos rodean en vez de amontonarse en el mismo pixel
         var (x, y) = Geometry.OnCircle(prey!.Entity.X, prey.Entity.Y,
             Dials.ApproachRadius, _rng.NextDouble() * Math.PI * 2, map);
-        npc.TargetX = x;
-        npc.TargetY = y;
+        // con la presa pegada al borde de un santuario, el punto puede caer
+        // dentro: el no provocado se planta en la orilla en vez de cruzar
+        if (!ai.Provoked && _safe.Inside(x, y))
+            (x, y) = _safe.NearestExit(x, y, Dials.MapMargin, _rng.NextDouble);
+        npc.TargetX = Math.Clamp(x, 0, map.BoundsX);
+        npc.TargetY = Math.Clamp(y, 0, map.BoundsY);
         ToThoseWhoSee(npc.Id, new EntityMoved(npc));
         ai.State = NpcAiState.WaitingForPrey;
     }

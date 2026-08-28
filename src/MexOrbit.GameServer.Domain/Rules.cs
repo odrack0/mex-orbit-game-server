@@ -105,3 +105,43 @@ public static class Loot
         return taken;
     }
 }
+
+/// <summary>Las zonas santuario del mapa: el circulo de la estacion y el de cada
+/// portal — exactamente los que el cliente PINTA, para que la regla coincida con
+/// lo que el jugador ve.
+///
+/// Un NPC no entra ahi por su cuenta: ni eligiendo destino de vagabundeo, ni
+/// colocandose junto a una presa, ni nace dentro. La UNICA llave es la
+/// provocacion: si el jugador abre fuego, su agresor puede cruzar (la misma
+/// regla del DMZ — el refugio no es un parapeto desde el que disparar gratis).</summary>
+public sealed class SafeZones
+{
+    private readonly List<(double X, double Y, double R)> _zones = [];
+
+    public static SafeZones Of(MapInfo map, IEnumerable<PortalInfo> portals, double portalRadius)
+    {
+        var zones = new SafeZones();
+        if (map.SecureRange > 0) zones._zones.Add((map.StationX, map.StationY, map.SecureRange));
+        foreach (var p in portals) zones._zones.Add((p.X, p.Y, portalRadius));
+        return zones;
+    }
+
+    public bool Inside(double x, double y) =>
+        _zones.Any(z => Geometry.Distance(x, y, z.X, z.Y) < z.R);
+
+    /// <summary>El punto mas cercano FUERA de la zona que contiene a (x,y), con
+    /// margen. En el centro exacto no hay direccion de salida: la pone el sorteo.</summary>
+    public (double X, double Y) NearestExit(double x, double y, double margin, Func<double> roll)
+    {
+        foreach (var (zx, zy, r) in _zones)
+        {
+            var dist = Geometry.Distance(x, y, zx, zy);
+            if (dist >= r) continue;
+            double dx, dy;
+            if (dist < 1) { var a = roll() * Math.PI * 2; dx = Math.Cos(a); dy = Math.Sin(a); }
+            else { dx = (x - zx) / dist; dy = (y - zy) / dist; }
+            return (zx + dx * (r + margin), zy + dy * (r + margin));
+        }
+        return (x, y);
+    }
+}

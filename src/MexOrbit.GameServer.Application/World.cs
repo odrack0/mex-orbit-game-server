@@ -80,6 +80,9 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     private readonly Dictionary<string, NpcPrice> _preciosPorLoot = npcPrices.ToDictionary(p => p.LootId);
     private ulong _nextBoxId = 5_000_000;
     private readonly Random _rng = new(20260825);
+    /// <summary>Los circulos de la estacion y de los portales — los mismos que el
+    /// cliente pinta. Los NPC no entran salvo provocados.</summary>
+    private readonly SafeZones _safe = SafeZones.Of(map, portals, Dials.JumpRange);
     private long _tick;
 
     public void Post(WorldCmd cmd) => _inbox.Writer.TryWrite(cmd);
