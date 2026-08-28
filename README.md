@@ -38,7 +38,7 @@ Los **Guidelines generales del juego** (`mex-orbit-docs`): toda mecánica implem
 
 Vertical slice E2/I7 jugable: mapas bajo demanda, combate, NPCs con IA portada del legado,
 bodega y cajas, base con descarga y venta, reconexión con ventana de gracia, chat y salto de
-sector, con relevancia por rango. Repartido en cinco proyectos (ver **Arquitectura**) y 83
+sector, con relevancia por rango. Repartido en cinco proyectos (ver **Arquitectura**) y 88
 pruebas de caracterización.
 
 ## Convenciones de codigo
@@ -119,7 +119,7 @@ roja si.
 dotnet test MexOrbit.GameServer.slnx
 ```
 
-**83 pruebas, ~100 ms, sin MySQL y sin socket.** Son de *caracterizacion*: se escribieron
+**88 pruebas, ~140 ms, sin MySQL y sin socket.** Son de *caracterizacion*: se escribieron
 contra el codigo ANTES de repartirlo en capas, para que el refactor no pudiera cambiar el
 juego sin que nadie se enterara. Fijan el escudo antes que el casco, la cadencia de 500 ms,
 la maquina de tres estados de la IA, la huida del Vorax, el DMZ de la estacion, la recogida
@@ -206,9 +206,9 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `DesaggroFactor` | `Domain/Dials.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
 | `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Domain/Dials.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
 | Aggro y agresividad | BD `npc_catalog.aggro_radius` / `is_aggressive` | 500-700 · solo el Ferox | Datos, no constantes: el radio y si caza son del catalogo |
-| Daño del NPC | BD `npc_catalog.damage` | 25-85 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
+| Daño del NPC | BD `npc_catalog.damage` | **10 (plano, temporal)** | Los 25-85 de la migracion `.7` se calibraron contra un jugador al que no se podia perseguir; con eso arreglado, la dificultad esta sin medir (migracion `.28.2`) |
 | Huida | BD `npc_catalog.flee_hp_pct` | 30 solo en el Vorax | Debajo de ese % de casco, el bicho se larga |
-| Combate NPC->jugador | BD `server_setting.npc_combat_enabled` | **0 (apagado)** | Apagado, los NPC persiguen pero no disparan |
+| Combate NPC->jugador | BD `server_setting.npc_combat_enabled` | **1 (encendido)** | Apagado, los NPC persiguen pero no disparan |
 | Relevancia de entidades | BD `server_setting.render_range_entities` | 2000 | A que distancia el cliente empieza a recibir naves y NPCs |
 | Relevancia de cajas | BD `server_setting.render_range_objects` | 1250 | Lo mismo para las cajas: mobiliario menudo, rango mas corto |
 | Histeresis de relevancia | BD `server_setting.render_range_hysteresis_pct` | 10 % | Margen extra para SALIR; 0 = un solo umbral, como el legado |
@@ -228,7 +228,7 @@ tres estados**, un pensamiento por segundo:
    alrededor del jugador, no encima de el: asi rodean en vez de amontonarse en un pixel.
 3. **EsperandoQueSeMueva** — aguanta ahi; si el jugador se mueve, vuelve a aproximarse.
 
-**El combate NPC→jugador tiene interruptor.** `server_setting.npc_combat_enabled` (hoy en **0**)
+**El combate NPC→jugador tiene interruptor.** `server_setting.npc_combat_enabled` (hoy en **1**)
 apaga solo el disparo: los bichos siguen vagabundeando, fichandote, persiguiendote, y el Vorax
 sigue huyendo malherido. Lo unico que no ocurre es el daño. Esta en BD y no en `appsettings.json`
 porque es una decision de JUEGO, no de despliegue — y asi queda asentado en
@@ -242,11 +242,23 @@ deja de disparar y no se da la vuelta ni aunque le sigas pegando. El **Vorax** e
 cobarde sin tocar el server.
 
 **Pasivo no es inofensivo.** Recibir un golpe convierte a cualquier NPC en agresor (el
-`ReceiveAttack` del legado), sea o no `is_aggressive`. En el 1-1 solo el **Ferox** caza por
-iniciativa propia; los otros cuatro devuelven el fuego.
+`ReceiveAttack` del legado), sea o no `is_aggressive`. En el 1-1 solo el **Ferox**, el **Mordax**
+y el **Vorax** cazan por iniciativa propia; el resto devuelve el fuego.
 
-**La zona segura de la estacion es el DMZ del legado**: dentro de ella no se entra ni se
-elige presa.
+**Y el golpe NO lo frena.** Lo hizo durante unas horas: el frenazo entro cuando todavia no habia
+IA y un bicho golpeado seguia paseando hasta salirse del alcance del laser. Esa misma tarde
+llego la maquina de estados con `FightBack`, que resuelve lo mismo por el buen camino —el bicho
+viene A POR TI— y desde entonces el frenazo cancelaba la persecucion que acababa de empezar.
+Peor: `Approach` ya habia dejado el estado en `WaitingForPrey`, que NO vuelve a emitir destino,
+asi que el bicho se quedaba plantado donde le pillo el primer disparo. Se veia como "no me
+persigue". El legado nunca lo hizo: su `ReceiveAttack` son dos lineas y ninguna toca el
+movimiento.
+
+**La zona segura de la estacion protege a quien NO ha disparado.** Es el DMZ del legado:
+dentro de ella nadie te ficha ni te dispara, por agresivo que sea. Pero si TU abres fuego, te
+lo devuelve y te sigue hasta dentro — el refugio no es un parapeto desde el que disparar
+gratis. En el codigo es la unica diferencia entre `NearestPlayer` (que jamas mira dentro) y
+`PreyOf` (que si, cuando el bicho fue provocado).
 
 Lo que **no** se copio del legado:
 

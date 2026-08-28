@@ -196,10 +196,17 @@ public sealed partial class World
         Combat.RegenerateShield(npc);
     }
 
+    /// <summary>La presa de un bicho, si todavia vale.
+    ///
+    /// La zona segura de la estacion protege a quien NO ha abierto fuego: ahi
+    /// dentro nadie te ficha ni te dispara, por agresivo que sea. Pero si TU
+    /// empezaste, te lo devuelve y te sigue hasta dentro — el DMZ es un refugio,
+    /// no un parapeto desde el que disparar gratis.</summary>
     private PlayerSlot? PreyOf(NpcAi ai) =>
         ai.TargetId == 0
             ? null
-            : _players.Values.FirstOrDefault(s => s.Entity.Id == ai.TargetId && !s.Dead && !s.AtStation);
+            : _players.Values.FirstOrDefault(s => s.Entity.Id == ai.TargetId && !s.Dead
+                && (ai.Provoked || !s.AtStation));
 
     /// <summary>El jugador vivo mas cercano dentro del radio. El legado recorria
     /// todos sin cortar y se quedaba con el ultimo; aqui gana el mas cercano.</summary>

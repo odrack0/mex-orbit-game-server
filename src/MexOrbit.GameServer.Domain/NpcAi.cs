@@ -48,20 +48,26 @@ public sealed class NpcAi
     /// <summary>Tick hasta el que sigue corriendo sin replantearse nada.</summary>
     public long FleeingUntilTick;
 
+    /// <summary>Le dispararon a EL. La zona segura de la estacion protege a quien
+    /// no ha abierto fuego; a quien si, no.</summary>
+    public bool Provoked;
+
     public void Forget()
     {
         TargetId = 0;
         Attacking = false;
+        Provoked = false;
         State = NpcAiState.Searching;
     }
 
     /// <summary>El ReceiveAttack del legado: quien te pega se vuelve tu objetivo,
     /// seas agresivo o no. Un cobarde en plena huida no se da la vuelta a pelear.</summary>
-    public void FightBack(ulong atacanteId)
+    public void FightBack(ulong attackerId)
     {
         if (State == NpcAiState.Fleeing) return;
-        TargetId = atacanteId;
+        TargetId = attackerId;
         Attacking = true;
+        Provoked = true;
         State = NpcAiState.Approaching;
     }
 }

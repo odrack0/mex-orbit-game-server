@@ -43,13 +43,18 @@ public sealed partial class World
         npc.LastHitTick = _tick;
         // ReceiveAttack del legado: quien le pega se vuelve su objetivo, sea el
         // bicho agresivo o no. Un pasivo no es un saco de boxeo: se defiende.
+        //
+        // Y el golpe NO lo frena. Lo hizo durante unas horas: el frenazo entro
+        // cuando todavia no habia IA y un bicho golpeado seguia paseando hasta
+        // salirse del alcance del laser. Cinco horas despues llego la maquina de
+        // estados con `FightBack`, que resuelve eso mismo por el buen camino —el
+        // bicho viene A POR TI— y el frenazo paso de arreglo a estorbo: cancelaba
+        // la persecucion que acababa de empezar. Peor aun, `Approach` ya habia
+        // dejado el estado en `WaitingForPrey`, que NO vuelve a emitir destino, asi
+        // que el bicho se quedaba plantado donde le pillo el primer disparo. El
+        // legado nunca lo hizo: su `ReceiveAttack` son dos lineas y ninguna toca
+        // el movimiento.
         if (_npcAi.TryGetValue(npc.Id, out var ai)) ai.FightBack(slot.Entity.Id);
-        // el golpe lo frena en seco donde este (y avisa a todos)
-        if (npc.Moving)
-        {
-            npc.Stop();
-            ToThoseWhoSee(npc.Id, new EntityMoved(npc));
-        }
         ToThoseWhoSee(slot.Entity.Id, npc.Id, new AttackLanded(slot.Entity.Id, npc.Id, Weapon.Laser, damage,
             npc.Hp, npc.Shield, false,
             // el aspecto del disparo: la municion equipada y si va potenciada.

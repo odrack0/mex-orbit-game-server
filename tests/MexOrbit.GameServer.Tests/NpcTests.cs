@@ -58,9 +58,9 @@ public class NpcTests
 
         m.Seconds(3);
 
-        var aproximaciones = p.All<EntityMove>().Where(e => e.EntityId == npc.Id).ToList();
-        Assert.NotEmpty(aproximaciones);
-        Assert.All(aproximaciones, a =>
+        var approaches = p.All<EntityMove>().Where(e => e.EntityId == npc.Id).ToList();
+        Assert.NotEmpty(approaches);
+        Assert.All(approaches, a =>
         {
             var dist = Math.Sqrt(Math.Pow((double)a.TargetX - 1_000, 2)
                                  + Math.Pow((double)a.TargetY - 1_000, 2));
@@ -124,6 +124,28 @@ public class NpcTests
     }
 
     [Fact]
+    public void Inside_the_safe_zone_it_does_fight_back_if_you_shoot_first()
+    {
+        // La zona segura protege a quien NO ha abierto fuego. Si tu empiezas, te
+        // lo devuelve aunque estes dentro: el DMZ es un refugio, no un parapeto
+        // desde el que disparar gratis.
+        var m = new TestWorld().WithMap(1_400, 1_400, 700, 700, 1_500)
+            .WithNpc(Beast(hp: 100_000, damage: 10, aggro: 500)).Build();
+        var p = m.Enter(1, laserDamage: 10, shield: 0,
+            data: m.Pilot(1, hp: 100_000, x: 700, y: 700));
+        var npc = m.FirstNpc();
+        m.Tick();
+        Assert.True(p.Last<StationRange>().InRange, "la prueba necesita al jugador en la base");
+        p.Clear();
+
+        m.W.Post(new SelectTargetCmd(p, npc.Id));
+        m.W.Post(new LaserToggleCmd(p, true));
+        m.Seconds(4);
+
+        Assert.Contains(p.All<AttackEvent>(), a => a.AttackerId == npc.Id);
+    }
+
+    [Fact]
     public void Outside_the_safe_zone_the_same_npc_does_fire()
     {
         // el control del anterior: mismo montaje, sin estacion
@@ -147,7 +169,7 @@ public class NpcTests
         var npc = m.FirstNpc();
         m.MoveNear(p, npc, 100);
         var (playerX, playerY) = m.Ship(1);
-        var distanciaPrevia = Math.Sqrt(Math.Pow(npc.X - playerX, 2) + Math.Pow(npc.Y - playerY, 2));
+        var distanceBefore = Math.Sqrt(Math.Pow(npc.X - playerX, 2) + Math.Pow(npc.Y - playerY, 2));
         p.Clear();
 
         m.W.Post(new SelectTargetCmd(p, npc.Id));
@@ -162,7 +184,7 @@ public class NpcTests
             .Select(e => Math.Sqrt(Math.Pow((double)e.TargetX - playerX, 2)
                                    + Math.Pow((double)e.TargetY - playerY, 2)))
             .ToList();
-        Assert.Contains(headings, d => d > distanciaPrevia + 1_000);
+        Assert.Contains(headings, d => d > distanceBefore + 1_000);
     }
 
     [Fact]

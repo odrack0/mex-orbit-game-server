@@ -154,27 +154,35 @@ public class CombatTests
     }
 
     [Fact]
-    public void A_hit_stops_the_npc_dead()
+    public void A_hit_does_not_freeze_the_npc_it_makes_it_come_at_you()
     {
-        // mapa diminuto: el bicho vagabundea pero jamas sale del alcance del
-        // laser. Con el mapa grande, volar hasta el le daba tiempo de largarse
-        // a 3000 unidades y el golpe no llegaba a producirse.
-        var m = new TestWorld().WithMap(1_200, 1_200, 1, 1, 0)
-            .WithNpc(new NpcSpawnInfo(1, "vex", "Vex", 10_000, 0, 200, 50, false, 0, 0,
+        // Aqui vivia lo contrario: el golpe frenaba al bicho en seco. Entro cuando
+        // todavia no habia IA —un bicho golpeado seguia paseando hasta salirse del
+        // alcance— y cinco horas despues `FightBack` resolvio eso por el buen
+        // camino. Desde entonces el frenazo cancelaba la persecucion que acababa
+        // de empezar, y como `Approach` ya habia dejado el estado en
+        // `WaitingForPrey` —que no vuelve a emitir destino— el bicho se quedaba
+        // plantado donde le pillo el primer disparo. Se veia como "no me persigue".
+        var m = WithoutStation()
+            // aggro 500 como el Vex real: `LostPrey` mide el desaggro contra ESE radio,
+            // asi que con 0 el bicho olvida a quien le dispara en el acto
+            .WithNpc(new NpcSpawnInfo(1, "vex", "Vex", 100_000, 0, 200, 10, false, 0, 500,
                 30, 1, 0, 0, 0, 0, 0))
             .Build();
-        var p = m.Enter(1, laserDamage: 10, data: m.Pilot(1, x: 600, y: 600));
         var npc = m.FirstNpc();
-        // el rumbo lo elige el sorteo, asi que se espera a que arranque de verdad
-        m.TickUntil(() => npc.Moving, what: "que el NPC eche a andar");
+        // el jugador se coloca RESPECTO al bicho: dentro del laser (600) y fuera
+        // de su circulo de aproximacion (300), que es donde se puede medir si cierra
+        var x = Math.Clamp(npc.X + 550, 0, 20_800);
+        var p = m.Enter(1, laserDamage: 10,
+            data: m.Pilot(1, x: (uint)Math.Round(x), y: (uint)Math.Round(npc.Y)));
+        var before = Geometry.Distance(npc.X, npc.Y, x, npc.Y);
 
         Fire(m, p, npc);
-        m.Tick();
+        m.Seconds(6);
 
-        // el golpe lo planta donde este
-        Assert.False(npc.Moving);
-        Assert.Equal(npc.X, npc.TargetX);
-        Assert.Equal(npc.Y, npc.TargetY);
+        var after = Geometry.Distance(npc.X, npc.Y, x, npc.Y);
+        Assert.True(after < 400,
+            $"se quedo plantado: de {before:F0} a {after:F0} u mientras le disparaban");
     }
 
     [Fact]
