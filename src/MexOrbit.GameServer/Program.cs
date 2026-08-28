@@ -23,7 +23,7 @@ var repo = new Repo(conn);
 var npcCombat = repo.LoadBoolSetting("npc_combat_enabled", true);
 // Los mapas se levantan cuando alguien entra, no al arrancar: 29 mapas serian 29
 // consultas y 29 poblaciones de NPC antes de que exista un solo jugador.
-var universo = new Universe(repo, log, tickMs, pingInterval, pingMisses, npcCombat);
+var universo = new Universe(repo, repo, repo, repo, repo, log, tickMs, pingInterval, pingMisses, npcCombat);
 var world = universo.Inicial();
 var mapa = world.Mapa;
 
@@ -40,7 +40,7 @@ app.Map("/ws", async context =>
         return;
     }
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
-    var conexion = new ClientConnection(socket, universo, repo, verifier, protocolVersion,
+    var conexion = new ClientConnection(socket, universo, repo, repo, verifier, protocolVersion,
         log.CreateLogger<ClientConnection>());
     await conexion.RunAsync();
 });

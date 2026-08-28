@@ -39,6 +39,7 @@ public sealed record PlayerData(long AccountId, string PilotName, byte Faction, 
 public sealed record MapServer(string Host, ushort Port, bool IsTls);
 
 public sealed class Repo(string connectionString)
+    : IMapCatalog, IGameCatalog, IServerSettings, IPlayerRepository, ISessionRepository, IEconomyRepository
 {
     private MySqlConnection Open() { var c = new MySqlConnection(connectionString); c.Open(); return c; }
 

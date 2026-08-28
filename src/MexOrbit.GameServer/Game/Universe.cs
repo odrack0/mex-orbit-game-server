@@ -15,7 +15,9 @@ using MexOrbit.GameServer.Data;
 
 namespace MexOrbit.GameServer.Game;
 
-public sealed class Universe(Repo repo, ILoggerFactory logs, int tickMs,
+public sealed class Universe(IMapCatalog maps, IGameCatalog catalogo,
+    IPlayerRepository jugadores, ISessionRepository sesiones, IEconomyRepository economia,
+    ILoggerFactory logs, int tickMs,
     int pingIntervalSeconds, int pingMissesToDrop, bool npcCombatEnabled)
 {
     private readonly Dictionary<string, World> _mundos = new();
@@ -25,7 +27,7 @@ public sealed class Universe(Repo repo, ILoggerFactory logs, int tickMs,
     /// el unico al que se llega sin haber estado antes en otro.</summary>
     public World Inicial()
     {
-        var mapa = repo.LoadStarterMap();
+        var mapa = maps.LoadStarterMap();
         return Obtener(mapa.Code)
             ?? throw new InvalidOperationException($"el mapa inicial {mapa.Code} no carga");
     }
@@ -35,15 +37,15 @@ public sealed class Universe(Repo repo, ILoggerFactory logs, int tickMs,
     {
         if (_mundos.TryGetValue(code, out var ya)) return ya;
 
-        var mapa = repo.LoadMap(code);
+        var mapa = maps.LoadMap(code);
         if (mapa == null)
         {
             _log.LogWarning("alguien pidio el mapa {code} y no existe en BD", code);
             return null;
         }
-        var mundo = new World(mapa, repo.LoadNpcSpawns(mapa.Id), repo.LoadZoneBias(mapa.ZoneTier),
-            repo.LoadRefineRecipe(), repo.LoadNpcPrices(), repo.LoadPortals(mapa.Id),
-            repo, logs.CreateLogger<World>(), tickMs, pingIntervalSeconds, pingMissesToDrop,
+        var mundo = new World(mapa, catalogo.LoadNpcSpawns(mapa.Id), catalogo.LoadZoneBias(mapa.ZoneTier),
+            catalogo.LoadRefineRecipe(), catalogo.LoadNpcPrices(), maps.LoadPortals(mapa.Id),
+            jugadores, sesiones, economia, logs.CreateLogger<World>(), tickMs, pingIntervalSeconds, pingMissesToDrop,
             npcCombatEnabled);
         mundo.SpawnNpcs();
         mundo.Saltar += Saltar;
@@ -87,13 +89,13 @@ public sealed class Universe(Repo repo, ILoggerFactory logs, int tickMs,
     /// fuera de todo mapa.</summary>
     private void Saltar(World origen, long accountId, PortalInfo portal)
     {
-        var mapa = repo.LoadMap(portal.TargetMapCode);
+        var mapa = maps.LoadMap(portal.TargetMapCode);
         if (mapa == null)
         {
             _log.LogWarning("salto a {code}: el mapa no existe", portal.TargetMapCode);
             return;
         }
-        var servidor = repo.LoadMapServer(mapa.Id);
+        var servidor = maps.LoadMapServer(mapa.Id);
         if (servidor == null)
         {
             _log.LogWarning("salto a {code}: el mapa no tiene servidor asignado", mapa.Code);
@@ -111,7 +113,7 @@ public sealed class Universe(Repo repo, ILoggerFactory logs, int tickMs,
     /// mas de un mapa al que volver.</summary>
     public World? DondeEsta(long mapId)
     {
-        var mapa = repo.LoadMapPorId(mapId);
+        var mapa = maps.LoadMapPorId(mapId);
         return mapa == null ? null : Obtener(mapa.Code);
     }
 }

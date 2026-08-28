@@ -9,7 +9,8 @@ using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Net;
 
-public sealed class ClientConnection(WebSocket socket, Universe universo, Repo repo, TicketVerifier verifier,
+public sealed class ClientConnection(WebSocket socket, Universe universo,
+    IPlayerRepository players, ISessionRepository sessions, TicketVerifier verifier,
     int protocolVersion, ILogger log) : IClientPort
 {
     private const int MaxFrame = 64 * 1024;
@@ -45,7 +46,7 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
                     Send(new ErrorReply { Code = ErrorCode.VersionUnsupported }.Encode());
                     return;
                 }
-                var sesion = repo.FindSessionByToken(resume.ReconnectToken);
+                var sesion = sessions.FindSessionByToken(resume.ReconnectToken);
                 if (sesion is null)
                 {
                     Send(new ErrorReply { Code = ErrorCode.ResumeExpired }.Encode());
@@ -55,15 +56,15 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
                 // El mundo sale de DONDE DICE LA BD que esta el jugador, y esto es
                 // lo que hace que el salto funcione sin credencial nueva: el origen
                 // ya lo persistio en el mapa destino antes de soltarlo.
-                var quien = repo.LoadPlayer(sesion.Value.AccountId);
+                var quien = players.LoadPlayer(sesion.Value.AccountId);
                 if (quien is not null) _world = universo.DondeEsta(quien.MapId) ?? _world;
                 // Se manda tambien con QUE reconstruirlo: si este mundo no lo ha
                 // visto nunca —que es justo el caso al llegar de otro mapa— entra
                 // de cero en vez de recibir un RESUME_EXPIRED.
                 _world.Post(new ResumeCmd(this, sesion.Value.AccountId, sesion.Value.SessionId,
-                    quien, quien is null ? 0 : repo.LoadLaserDamage(sesion.Value.AccountId),
-                    quien is null ? 0 : repo.LoadShieldCapacity(sesion.Value.AccountId),
-                    quien is null ? null : repo.LoadCargo(sesion.Value.AccountId)));
+                    quien, quien is null ? 0 : players.LoadLaserDamage(sesion.Value.AccountId),
+                    quien is null ? 0 : players.LoadShieldCapacity(sesion.Value.AccountId),
+                    quien is null ? null : players.LoadCargo(sesion.Value.AccountId)));
                 await LoopAsync();
                 return;
             }
@@ -91,7 +92,7 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
                 Send(new ErrorReply { Code = Enum.Parse<ErrorCode>(Pascal(error), true) }.Encode());
                 return;
             }
-            var player = repo.LoadPlayer(accountId);
+            var player = players.LoadPlayer(accountId);
             // Se entra DONDE SE DEJO el juego, no siempre en el mapa inicial. Antes
             // daba igual porque solo habia un mapa; en cuanto hay dos, entrar
             // siempre en el 1-1 teletransporta a quien cerro sesion en otro sitio.
@@ -102,10 +103,10 @@ public sealed class ClientConnection(WebSocket socket, Universe universo, Repo r
                 return;
             }
             AccountId = accountId;
-            var laserDamage = repo.LoadLaserDamage(accountId);
-            var maxShield = repo.LoadShieldCapacity(accountId);
-            var cargo = repo.LoadCargo(accountId);
-            var (sessionId, reconnectToken) = repo.OpenSession(accountId);
+            var laserDamage = players.LoadLaserDamage(accountId);
+            var maxShield = players.LoadShieldCapacity(accountId);
+            var cargo = players.LoadCargo(accountId);
+            var (sessionId, reconnectToken) = sessions.OpenSession(accountId);
 
             Send(new Welcome
             {

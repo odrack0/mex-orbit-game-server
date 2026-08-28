@@ -36,7 +36,8 @@ public sealed record JumpCmd(IClientPort Port, ulong RequestId, ulong PortalId) 
 
 public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<MaterialBias> zoneBias,
     RefineRecipe? refineRecipe, List<NpcPrice> npcPrices, List<PortalInfo> portals,
-    Repo repo, ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop,
+    IPlayerRepository players, ISessionRepository sessions, IEconomyRepository economy,
+    ILogger<World> log, int tickMs, int pingIntervalSeconds, int pingMissesToDrop,
     bool npcCombatEnabled = true)
 {
     // Diales de combate y loot del slice (documentados en el README del repo).
@@ -177,6 +178,11 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
 
     internal MapInfo Mapa => map;
 
+    // ─── ventanas de inspeccion (solo para las pruebas; `internal`, no API) ──
+    internal IReadOnlyDictionary<ulong, Entity> NpcsVivos => _npcs;
+    internal IReadOnlyCollection<ulong> CajasVivas => _boxes.Keys;
+    internal long TickActual => _tick;
+
     private void Tick(double dt)
     {
         while (_inbox.Reader.TryRead(out var cmd)) Handle(cmd);
@@ -255,9 +261,9 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             {
                 var (id, mapId, x, y, hp, esc) = (slot.Data.AccountId, map.Id,
                     (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield);
-                _ = Task.Run(() => Safe(() => repo.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
+                _ = Task.Run(() => Safe(() => players.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
                 var sid = slot.SessionId;
-                _ = Task.Run(() => Safe(() => repo.TouchSession(sid), "TouchSession"));
+                _ = Task.Run(() => Safe(() => sessions.TouchSession(sid), "TouchSession"));
             }
     }
 
@@ -482,7 +488,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             }.Encode());
             slot.Cargo.Clear();
             var id = slot.Data.AccountId;
-            _ = Task.Run(() => Safe(() => repo.ClearCargo(id, (long)caja.Id), "ClearCargo"));
+            _ = Task.Run(() => Safe(() => economy.ClearCargo(id, (long)caja.Id), "ClearCargo"));
         }
 
         var opciones = new RespawnOptions { Cause = DeathCause.Npc, KillerName = asesino.Name };
@@ -511,7 +517,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         ActualizarRangoBase(slot);
         var (id, mapId, x, y, hp, esc) = (slot.Data.AccountId, map.Id,
             (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield);
-        _ = Task.Run(() => Safe(() => repo.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
+        _ = Task.Run(() => Safe(() => players.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
     }
 
     // ─── reconexion y chat ──────────────────────────────────────────────────
@@ -610,7 +616,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         try
         {
             // sincrono: la respuesta solo sale si la BD ya lo tiene
-            resultado = repo.UnloadAndRefine(slot.Data.AccountId, refineRecipe);
+            resultado = economy.UnloadAndRefine(slot.Data.AccountId, refineRecipe);
         }
         catch (Exception ex)
         {
@@ -652,7 +658,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         (uint Sold, decimal Gained, decimal NewCredits) venta;
         try
         {
-            venta = repo.SellToNpc(slot.Data.AccountId, precio.ItemId, (uint)cmd.Amount, precio.PriceCredits);
+            venta = economy.SellToNpc(slot.Data.AccountId, precio.ItemId, (uint)cmd.Amount, precio.PriceCredits);
         }
         catch (Exception ex)
         {
@@ -686,7 +692,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         // lectura fuera del hilo del tick: el estado ya se persistio
         _ = Task.Run(() => Safe(() =>
         {
-            var saldos = repo.LoadStorage(accountId);
+            var saldos = economy.LoadStorage(accountId);
             var msg = new StorageState();
             foreach (var (lootId, amount) in saldos)
                 msg.Materials.Add(new MaterialAmount { MaterialId = lootId, Amount = (uint)amount });
@@ -770,7 +776,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         var credits = (decimal)info.RewardCredits;
         slot.Credits += credits;
         var accountId = slot.Data.AccountId;
-        _ = Task.Run(() => Safe(() => repo.AddCredits(accountId, credits, "NPC_KILL", (long)npc.Id), "AddCredits"));
+        _ = Task.Run(() => Safe(() => economy.AddCredits(accountId, credits, "NPC_KILL", (long)npc.Id), "AddCredits"));
         slot.Port.Send(HeroStatsDe(slot).Encode());
 
         // la caja: el NPC pone la cantidad, la ZONA pone la mezcla (§4 guidelines)
@@ -840,7 +846,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         try
         {
             // sincrono a proposito: el CollectResult solo sale si la BD ya lo tiene
-            repo.AddCargoPickup(slot.Data.AccountId, tomados, (long)caja.Id);
+            economy.AddCargoPickup(slot.Data.AccountId, tomados, (long)caja.Id);
         }
         catch (Exception ex)
         {
@@ -1033,7 +1039,7 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
         _players.Remove(accountId);
         Despawn(slot.Entity.Id, DespawnReason.Left);
         var (hp, esc) = (slot.Entity.Hp, slot.Entity.Shield);
-        repo.SaveShipState(accountId, mapaDestino, x, y, hp, esc);
+        players.SaveShipState(accountId, mapaDestino, x, y, hp, esc);
         // El socket NO se cierra aqui. Cerrarlo justo despues de mandar el aviso
         // era una carrera que el aviso perdia: el frame se queda en la cola de
         // salida y el cierre lo tira. Cierra el CLIENTE, que es quien sabe que ya
@@ -1068,8 +1074,8 @@ public sealed class World(MapInfo map, List<NpcSpawnInfo> npcSpawns, List<Materi
             (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield, slot.SessionId);
         _ = Task.Run(() => Safe(() =>
         {
-            repo.SaveShipState(id, mapId, x, y, hp, esc);   // el estado siempre se persiste al salir
-            repo.CloseSession(sid, reason);
+            players.SaveShipState(id, mapId, x, y, hp, esc);   // el estado siempre se persiste al salir
+            sessions.CloseSession(sid, reason);
         }, "Drop"));
         log.LogInformation("cuenta {id} salio ({reason})", id, reason);
     }

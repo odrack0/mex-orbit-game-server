@@ -4,3 +4,6 @@ obj/
 
 # secretos locales
 appsettings.Local.json
+
+# Visual Studio
+.vs/
