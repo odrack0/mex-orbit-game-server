@@ -186,6 +186,35 @@ public class CombatTests
     }
 
     [Fact]
+    public void Sustained_fire_does_not_make_the_npc_dance_around_the_ship()
+    {
+        // `FightBack` reiniciaba la aproximacion en cada golpe: con el laser
+        // pegando cada 500 ms, el bicho re-elegia un punto del circulo CADA
+        // pensamiento y bailoteaba alrededor de la nave sin plantarse nunca. El
+        // legado no tocaba la maquina de estados al recibir un golpe, y esa
+        // diferencia era ademas la fuente de los tirones en el cliente: cada
+        // rumbo nuevo le obligaba a girar con el avance frenado mientras el
+        // server volaba recto.
+        var m = WithoutStation()
+            .WithNpc(new NpcSpawnInfo(1, "vex", "Vex", 100_000, 0, 200, 10, false, 0, 500,
+                30, 1, 0, 0, 0, 0, 0))
+            .Build();
+        var npc = m.FirstNpc();
+        var x = Math.Clamp(npc.X + 400, 0, 20_800);
+        var p = m.Enter(1, laserDamage: 10,
+            data: m.Pilot(1, x: (uint)Math.Round(x), y: (uint)Math.Round(npc.Y)));
+        p.Clear();
+
+        Fire(m, p, npc);
+        m.Seconds(8);
+
+        // el tramo hasta el circulo y como mucho un reajuste; uno por segundo
+        // seria el bailoteo de vuelta
+        var headings = p.All<EntityMove>().Count(e => e.EntityId == npc.Id);
+        Assert.InRange(headings, 1, 3);
+    }
+
+    [Fact]
     public void The_shot_travels_with_the_equipped_ammo()
     {
         var m = WithoutStation().WithDummy(hp: 10_000, shield: 0).Build();

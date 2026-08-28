@@ -61,13 +61,22 @@ public sealed class NpcAi
     }
 
     /// <summary>El ReceiveAttack del legado: quien te pega se vuelve tu objetivo,
-    /// seas agresivo o no. Un cobarde en plena huida no se da la vuelta a pelear.</summary>
+    /// seas agresivo o no. Un cobarde en plena huida no se da la vuelta a pelear.
+    ///
+    /// Y NO reinicia la aproximacion si ya esta peleando. Lo hizo un tiempo, y
+    /// con el laser pegando cada 500 ms el bicho re-elegia un punto del circulo
+    /// CADA pensamiento: bailoteaba alrededor de la nave sin plantarse nunca, y
+    /// de paso obligaba al cliente a girar sin parar —con el avance frenado por
+    /// la proa— mientras el server volaba recto a velocidad plena. Esa
+    /// divergencia es la que se veia como tirones y teletransportes. El legado
+    /// nunca toco aqui la maquina de estados: su `ReceiveAttack` solo marcaba
+    /// `Selected` y `Attacking`.</summary>
     public void FightBack(ulong attackerId)
     {
         if (State == NpcAiState.Fleeing) return;
         TargetId = attackerId;
         Attacking = true;
         Provoked = true;
-        State = NpcAiState.Approaching;
+        if (State == NpcAiState.Searching) State = NpcAiState.Approaching;
     }
 }
