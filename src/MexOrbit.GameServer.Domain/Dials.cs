@@ -9,7 +9,7 @@
 // aqui: viven en BD con su auditoria. Esto es cadencia y geometria.
 namespace MexOrbit.GameServer.Domain;
 
-public static class Diales
+public static class Dials
 {
     // ─── combate del jugador ────────────────────────────────────────────────
     /// <summary>Alcance del laser. Fuera de rango el laser ESPERA, no se apaga.</summary>
@@ -38,7 +38,7 @@ public static class Diales
     public const double NpcAttackRange = 600;
     /// <summary>`ALIEN_DISTANCE_TO_USER` del legado: se plantan en el CIRCULO de
     /// este radio alrededor de la presa, no encima de ella.</summary>
-    public const double AproximacionRadio = 300;
+    public const double ApproachRadius = 300;
     /// <summary>Se rinde a este multiplo de su radio de aggro.</summary>
     public const double DesaggroFactor = 1.8;
     /// <summary>10% de escudo por segundo...</summary>
@@ -46,14 +46,14 @@ public static class Diales
     /// <summary>...tras 10 s sin recibir fuego.</summary>
     public const int NpcOutOfCombatMs = 10_000;
     /// <summary>Cuanto corre un cobarde antes de recomponerse.</summary>
-    public const int HuidaMs = 12_000;
+    public const int FleeMs = 12_000;
     /// <summary>Hasta donde se larga.</summary>
-    public const double HuidaDistancia = 2_500;
+    public const double FleeDistance = 2_500;
 
     // ─── salto ──────────────────────────────────────────────────────────────
     /// <summary>Hay que estar JUNTO al portal para saltar.</summary>
     public const double JumpRange = 600;
 
     /// <summary>El margen que los NPC dejan a los bordes al elegir destino.</summary>
-    public const int MargenDelMapa = 500;
+    public const int MapMargin = 500;
 }

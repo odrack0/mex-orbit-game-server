@@ -8,7 +8,7 @@ using MexOrbit.GameServer.Application;
 namespace MexOrbit.GameServer.Infrastructure;
 
 public sealed class SessionRepository(string connectionString)
-    : MySqlRepositorio(connectionString), ISessionRepository
+    : MySqlRepository(connectionString), ISessionRepository
 {
     /// <summary>Cierra cualquier sesion viva de la cuenta y abre la nueva (sesion unica por diseño).</summary>
     public (long SessionId, string ReconnectToken) OpenSession(long accountId)

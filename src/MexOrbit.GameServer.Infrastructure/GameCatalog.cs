@@ -7,7 +7,7 @@ using MexOrbit.GameServer.Domain;
 namespace MexOrbit.GameServer.Infrastructure;
 
 public sealed class GameCatalog(string connectionString)
-    : MySqlRepositorio(connectionString), IGameCatalog
+    : MySqlRepository(connectionString), IGameCatalog
 {
     public List<NpcSpawnInfo> LoadNpcSpawns(long mapId)
     {
@@ -38,18 +38,18 @@ public sealed class GameCatalog(string connectionString)
     public RefineRecipe? LoadRefineRecipe()
     {
         using var db = Open();
-        var receta = db.QuerySingleOrDefault<(long Id, long OutputItemId, string OutputLootId, uint OutputAmount)?>(
+        var recipe = db.QuerySingleOrDefault<(long Id, long OutputItemId, string OutputLootId, uint OutputAmount)?>(
             @"SELECT CAST(r.id AS SIGNED) AS Id, CAST(r.output_item_id AS SIGNED) AS OutputItemId,
                      i.loot_id AS OutputLootId, r.output_amount AS OutputAmount
               FROM refine_recipe r JOIN server_item i ON i.id = r.output_item_id
               WHERE r.is_active = 1 LIMIT 1");
-        if (receta is null) return null;
-        var ingredientes = db.Query<(long ItemId, uint Amount)>(
+        if (recipe is null) return null;
+        var ingredients = db.Query<(long ItemId, uint Amount)>(
             @"SELECT CAST(server_item_id AS SIGNED) AS ItemId, amount
-              FROM refine_recipe_ingredient WHERE recipe_id = @id", new { id = receta.Value.Id })
+              FROM refine_recipe_ingredient WHERE recipe_id = @id", new { id = recipe.Value.Id })
             .ToDictionary(r => r.ItemId, r => r.Amount);
-        return new RefineRecipe(receta.Value.OutputItemId, receta.Value.OutputLootId,
-            receta.Value.OutputAmount, ingredientes);
+        return new RefineRecipe(recipe.Value.OutputItemId, recipe.Value.OutputLootId,
+            recipe.Value.OutputAmount, ingredients);
     }
 
     public List<NpcPrice> LoadNpcPrices()
@@ -65,26 +65,26 @@ public sealed class GameCatalog(string connectionString)
 /// <summary>Los diales de JUEGO que viven en BD con su auditoria, no en
 /// appsettings: mover uno queda asentado en `server_setting_audit`.</summary>
 public sealed class ServerSettings(string connectionString)
-    : MySqlRepositorio(connectionString), IServerSettings
+    : MySqlRepository(connectionString), IServerSettings
 {
     /// <summary>Escalar booleano de `server_setting`. Si la fila no existe se usa
     /// el valor por defecto: un dial ausente jamas debe tumbar el arranque.</summary>
-    public bool LoadBoolSetting(string key, bool porDefecto)
+    public bool LoadBoolSetting(string key, bool fallback)
     {
         using var db = Open();
         var v = db.ExecuteScalar<string?>(
             "SELECT value FROM server_setting WHERE setting_key = @key", new { key });
-        if (v is null) return porDefecto;
+        if (v is null) return fallback;
         return v is "1" or "true" or "TRUE" or "True";
     }
 
     /// <summary>Escalar entero de `server_setting`. Un valor corrupto vale lo
     /// mismo que una fila ausente: el default, y el server arranca igual.</summary>
-    public int LoadIntSetting(string key, int porDefecto)
+    public int LoadIntSetting(string key, int fallback)
     {
         using var db = Open();
         var v = db.ExecuteScalar<string?>(
             "SELECT value FROM server_setting WHERE setting_key = @key", new { key });
-        return int.TryParse(v, out var n) ? n : porDefecto;
+        return int.TryParse(v, out var n) ? n : fallback;
     }
 }

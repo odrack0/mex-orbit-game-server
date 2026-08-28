@@ -26,42 +26,42 @@ namespace MexOrbit.GameServer.Domain;
 public enum NpcAiState
 {
     /// <summary>Sin presa: vagabundea por el mapa.</summary>
-    Buscando,
+    Searching,
     /// <summary>Tiene presa: se aproxima a su circulo.</summary>
-    VolandoAlEnemigo,
+    Approaching,
     /// <summary>Ya esta al lado: aguanta hasta que la presa se mueva.</summary>
-    EsperandoQueSeMueva,
+    WaitingForPrey,
     /// <summary>Malherido: corre lejos y deja de disparar. Solo lo usan los
     /// bichos con `flee_hp_pct` &gt; 0 — el Vorax es el primero.</summary>
-    Huyendo,
+    Fleeing,
 }
 
 public sealed class NpcAi
 {
-    public NpcAiState Estado = NpcAiState.Buscando;
+    public NpcAiState State = NpcAiState.Searching;
     /// <summary>entity_id del jugador perseguido (0 = ninguno).</summary>
     public ulong TargetId;
     /// <summary>Si dispara. Un NPC pasivo solo lo enciende al ser golpeado.</summary>
-    public bool Atacando;
-    public long ProximoPensamientoTick;
-    public long ProximoDisparoTick;
+    public bool Attacking;
+    public long NextThinkTick;
+    public long NextShotTick;
     /// <summary>Tick hasta el que sigue corriendo sin replantearse nada.</summary>
-    public long HuyendoHastaTick;
+    public long FleeingUntilTick;
 
-    public void Olvidar()
+    public void Forget()
     {
         TargetId = 0;
-        Atacando = false;
-        Estado = NpcAiState.Buscando;
+        Attacking = false;
+        State = NpcAiState.Searching;
     }
 
     /// <summary>El ReceiveAttack del legado: quien te pega se vuelve tu objetivo,
     /// seas agresivo o no. Un cobarde en plena huida no se da la vuelta a pelear.</summary>
-    public void Devolver(ulong atacanteId)
+    public void FightBack(ulong atacanteId)
     {
-        if (Estado == NpcAiState.Huyendo) return;
+        if (State == NpcAiState.Fleeing) return;
         TargetId = atacanteId;
-        Atacando = true;
-        Estado = NpcAiState.VolandoAlEnemigo;
+        Attacking = true;
+        State = NpcAiState.Approaching;
     }
 }

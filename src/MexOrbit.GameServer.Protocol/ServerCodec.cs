@@ -11,38 +11,38 @@ namespace MexOrbit.GameServer.Protocol;
 
 public sealed class ServerCodec : IServerCodec
 {
-    public byte[] Encode(ServerEvent evento) => evento switch
+    public byte[] Encode(ServerEvent serverEvent) => serverEvent switch
     {
         EntitySpawned e => new W.EntitySpawn
         {
-            EntityId = e.Entidad.Id,
-            Kind = Traduccion.AlCable(e.Entidad.Kind),
-            TypeId = e.Entidad.TypeId,
-            Name = e.Entidad.Name,
-            Faction = e.Entidad.Faction,
-            X = Traduccion.Redondear(e.Entidad.X),
-            Y = Traduccion.Redondear(e.Entidad.Y),
-            HpPct = e.Entidad.HpPct,
-            Speed = e.Entidad.Speed,
+            EntityId = e.Entity.Id,
+            Kind = WireMapping.ToWire(e.Entity.Kind),
+            TypeId = e.Entity.TypeId,
+            Name = e.Entity.Name,
+            Faction = e.Entity.Faction,
+            X = WireMapping.Round(e.Entity.X),
+            Y = WireMapping.Round(e.Entity.Y),
+            HpPct = e.Entity.HpPct,
+            Speed = e.Entity.Speed,
             // casco y escudo viajan por separado: son dos barras, no una suma
-            ShieldPct = e.Entidad.ShieldPct,
+            ShieldPct = e.Entity.ShieldPct,
         }.Encode(),
 
         EntityMoved e => new W.EntityMove
         {
-            EntityId = e.Entidad.Id,
-            X = Traduccion.Redondear(e.Entidad.X),
-            Y = Traduccion.Redondear(e.Entidad.Y),
-            TargetX = Traduccion.Redondear(e.Entidad.TargetX),
-            TargetY = Traduccion.Redondear(e.Entidad.TargetY),
-            Speed = e.Entidad.Speed,
+            EntityId = e.Entity.Id,
+            X = WireMapping.Round(e.Entity.X),
+            Y = WireMapping.Round(e.Entity.Y),
+            TargetX = WireMapping.Round(e.Entity.TargetX),
+            TargetY = WireMapping.Round(e.Entity.TargetY),
+            Speed = e.Entity.Speed,
             Teleport = e.Teleport,
         }.Encode(),
 
         EntityDespawned e => new W.EntityDespawn
         {
             EntityId = e.EntityId,
-            Reason = Traduccion.AlCable(e.Reason),
+            Reason = WireMapping.ToWire(e.Reason),
         }.Encode(),
 
         EntityDestroyed e => new W.EntityDestroyed
@@ -55,7 +55,7 @@ public sealed class ServerCodec : IServerCodec
         {
             AttackerId = e.AttackerId,
             TargetId = e.TargetId,
-            Weapon = Traduccion.AlCable(e.Weapon),
+            Weapon = WireMapping.ToWire(e.Weapon),
             Damage = e.Damage,
             TargetHp = e.TargetHp,
             TargetShield = e.TargetShield,
@@ -68,19 +68,19 @@ public sealed class ServerCodec : IServerCodec
         {
             BoxId = e.BoxId,
             BoxType = e.BoxType,
-            X = Traduccion.Redondear(e.X),
-            Y = Traduccion.Redondear(e.Y),
+            X = WireMapping.Round(e.X),
+            Y = WireMapping.Round(e.Y),
         }.Encode(),
 
         BoxDespawned e => new W.BoxDespawn
         {
             BoxId = e.BoxId,
-            Reason = Traduccion.AlCable(e.Reason),
+            Reason = WireMapping.ToWire(e.Reason),
         }.Encode(),
 
         MapEntered e => EnterMap(e),
 
-        PricesPublished e => Precios(e),
+        PricesPublished e => Prices(e),
 
         HeroStatsUpdated e => new W.HeroStats
         {
@@ -102,9 +102,9 @@ public sealed class ServerCodec : IServerCodec
 
         RespawnOffered e => Respawn(e),
 
-        Collected e => Recogida(e),
+        Collected e => EncodeCollected(e),
 
-        Unloaded e => Descarga(e),
+        Unloaded e => EncodeUnloaded(e),
 
         Sold e => new W.SellResult
         {
@@ -113,7 +113,7 @@ public sealed class ServerCodec : IServerCodec
             NewCredits = e.NewCredits,
         }.Encode(),
 
-        StorageSynced e => Almacen(e),
+        StorageSynced e => EncodeStorage(e),
 
         Welcomed e => new W.Welcome
         {
@@ -132,13 +132,13 @@ public sealed class ServerCodec : IServerCodec
         Failed e => new W.ErrorReply
         {
             RequestId = e.RequestId,
-            Code = Traduccion.AlCable(e.Code),
+            Code = WireMapping.ToWire(e.Code),
             Detail = e.Detail,
         }.Encode(),
 
         ChatBroadcast e => new W.ChatMessage
         {
-            Channel = Traduccion.AlCable(e.Channel),
+            Channel = WireMapping.ToWire(e.Channel),
             FromName = e.FromName,
             FromClan = e.FromClan,
             Text = e.Text,
@@ -148,27 +148,27 @@ public sealed class ServerCodec : IServerCodec
         JumpHandedOff e => new W.JumpHandoff
         {
             MapCode = e.MapCode,
-            Host = e.Servidor.Host,
-            Port = e.Servidor.Port,
-            IsTls = e.Servidor.IsTls,
+            Host = e.Server.Host,
+            Port = e.Server.Port,
+            IsTls = e.Server.IsTls,
         }.Encode(),
 
         // un evento sin traduccion es un error de programacion, no un caso raro
-        _ => throw new ArgumentOutOfRangeException(nameof(evento), evento,
-            $"el codec no sabe poner en el cable un {evento.GetType().Name}"),
+        _ => throw new ArgumentOutOfRangeException(nameof(serverEvent), serverEvent,
+            $"el codec no sabe poner en el cable un {serverEvent.GetType().Name}"),
     };
 
     private static byte[] EnterMap(MapEntered e)
     {
-        var mapa = e.Mapa;
+        var map = e.Map;
         var msg = new W.EnterMap
         {
-            MapId = (ulong)mapa.Id, MapCode = mapa.Code,
-            LimitsX = mapa.BoundsX, LimitsY = mapa.BoundsY, CargoRiskPct = e.CargoRiskPct,
-            StationX = mapa.StationX, StationY = mapa.StationY, StationRange = mapa.SecureRange,
+            MapId = (ulong)map.Id, MapCode = map.Code,
+            LimitsX = map.BoundsX, LimitsY = map.BoundsY, CargoRiskPct = e.CargoRiskPct,
+            StationX = map.StationX, StationY = map.StationY, StationRange = map.SecureRange,
         };
         // los portales van completos aqui: son mobiliario del mapa, no entidades
-        foreach (var p in e.Portales)
+        foreach (var p in e.Portals)
             msg.Portals.Add(new W.MapPortal
             {
                 PortalId = (ulong)p.Id, X = p.X, Y = p.Y,
@@ -177,10 +177,10 @@ public sealed class ServerCodec : IServerCodec
         return msg.Encode();
     }
 
-    private static byte[] Precios(PricesPublished e)
+    private static byte[] Prices(PricesPublished e)
     {
         var msg = new W.NpcPrices();
-        foreach (var p in e.Precios)
+        foreach (var p in e.Prices)
             msg.Prices.Add(new W.MaterialPrice
             {
                 MaterialId = p.LootId, PriceCredits = (ulong)p.PriceCredits,
@@ -192,10 +192,10 @@ public sealed class ServerCodec : IServerCodec
     {
         var msg = new W.RespawnOptions
         {
-            Cause = Traduccion.AlCable(e.Cause),
+            Cause = WireMapping.ToWire(e.Cause),
             KillerName = e.KillerName,
         };
-        foreach (var o in e.Opciones)
+        foreach (var o in e.Options)
             msg.Options.Add(new W.RespawnOption
             {
                 OptionId = o.OptionId, LabelKey = o.LabelKey,
@@ -204,14 +204,14 @@ public sealed class ServerCodec : IServerCodec
         return msg.Encode();
     }
 
-    private static byte[] Recogida(Collected e)
+    private static byte[] EncodeCollected(Collected e)
     {
         var msg = new W.CollectResult { RequestId = e.RequestId };
         foreach (var d in e.Drops) msg.Drops.Add(Material(d));
         return msg.Encode();
     }
 
-    private static byte[] Descarga(Unloaded e)
+    private static byte[] EncodeUnloaded(Unloaded e)
     {
         var msg = new W.UnloadResult { RequestId = e.RequestId };
         foreach (var d in e.Stored) msg.Stored.Add(Material(d));
@@ -219,10 +219,10 @@ public sealed class ServerCodec : IServerCodec
         return msg.Encode();
     }
 
-    private static byte[] Almacen(StorageSynced e)
+    private static byte[] EncodeStorage(StorageSynced e)
     {
         var msg = new W.StorageState();
-        foreach (var m in e.Materiales) msg.Materials.Add(Material(m));
+        foreach (var m in e.Materials) msg.Materials.Add(Material(m));
         return msg.Encode();
     }
 

@@ -13,82 +13,82 @@ using Domain = MexOrbit.GameServer.Domain;
 
 namespace MexOrbit.GameServer.Tests;
 
-public class ArquitecturaTests
+public class ArchitectureTests
 {
-    private static readonly Assembly Dominio = typeof(Entity).Assembly;
-    private static readonly Assembly Aplicacion = typeof(World).Assembly;
+    private static readonly Assembly DomainAsm = typeof(Entity).Assembly;
+    private static readonly Assembly ApplicationAsm = typeof(World).Assembly;
 
-    private static List<string> Referencias(Assembly a) =>
+    private static List<string> ReferencesOf(Assembly a) =>
         [.. a.GetReferencedAssemblies().Select(r => r.Name ?? "")];
 
     [Fact]
-    public void El_dominio_no_sabe_que_existe_una_base_de_datos()
+    public void The_domain_does_not_know_a_database_exists()
     {
-        Assert.DoesNotContain(Referencias(Dominio),
+        Assert.DoesNotContain(ReferencesOf(DomainAsm),
             r => r.Contains("MySql", StringComparison.OrdinalIgnoreCase)
                  || r.Contains("Dapper", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void El_dominio_no_sabe_que_existe_un_protocolo_binario()
+    public void The_domain_does_not_know_a_binary_protocol_exists()
     {
         // las reglas del juego no pueden depender de como viajan las cosas
-        Assert.DoesNotContain(Referencias(Dominio),
+        Assert.DoesNotContain(ReferencesOf(DomainAsm),
             r => r.Contains("Protocol", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void El_dominio_no_conoce_a_ninguna_capa_de_fuera()
+    public void The_domain_knows_no_outer_layer()
     {
-        Assert.DoesNotContain(Referencias(Dominio),
+        Assert.DoesNotContain(ReferencesOf(DomainAsm),
             r => r.StartsWith("MexOrbit.GameServer.", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void La_aplicacion_solo_conoce_al_dominio()
+    public void The_application_only_knows_the_domain()
     {
-        var propias = Referencias(Aplicacion)
+        var own = ReferencesOf(ApplicationAsm)
             .Where(r => r.StartsWith("MexOrbit", StringComparison.Ordinal))
             .ToList();
-        Assert.Equal(["MexOrbit.GameServer.Domain"], propias);
+        Assert.Equal(["MexOrbit.GameServer.Domain"], own);
     }
 
     [Fact]
-    public void La_aplicacion_no_toca_ni_la_BD_ni_el_cable()
+    public void The_application_touches_neither_the_db_nor_the_wire()
     {
         // habla con ellos por PUERTOS: IEconomyRepository, IServerCodec, IClock
-        Assert.DoesNotContain(Referencias(Aplicacion),
+        Assert.DoesNotContain(ReferencesOf(ApplicationAsm),
             r => r.Contains("MySql", StringComparison.OrdinalIgnoreCase)
                  || r.Contains("Dapper", StringComparison.OrdinalIgnoreCase)
                  || r.Contains("BouncyCastle", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void Todo_lo_que_el_mundo_cuenta_sabe_ponerse_en_el_cable()
+    public void Everything_the_world_reports_can_be_put_on_the_wire()
     {
         // un evento nuevo sin traduccion es un fallo que solo aparecia el dia que
         // se disparaba en produccion; aqui aparece al añadirlo
         var codec = new global::MexOrbit.GameServer.Protocol.ServerCodec();
-        var eventos = Aplicacion.GetTypes()
+        var events = ApplicationAsm.GetTypes()
             .Where(t => t.IsSubclassOf(typeof(ServerEvent)) && !t.IsAbstract)
             .ToList();
 
-        Assert.NotEmpty(eventos);
-        var sinTraducir = eventos
-            .Where(t => !SabeTraducirse(codec, t))
+        Assert.NotEmpty(events);
+        var untranslated = events
+            .Where(t => !CanBeEncoded(codec, t))
             .Select(t => t.Name)
             .ToList();
-        Assert.Empty(sinTraducir);
+        Assert.Empty(untranslated);
     }
 
     /// <summary>Se arma el evento con valores por defecto y se le pide al codec
     /// que lo codifique. Solo interesa que NO responda "no se que es esto".</summary>
-    private static bool SabeTraducirse(
+    private static bool CanBeEncoded(
         global::MexOrbit.GameServer.Protocol.ServerCodec codec, Type tipo)
     {
         try
         {
-            codec.Encode((ServerEvent)EventoDeMuestra(tipo));
+            codec.Encode((ServerEvent)SampleEvent(tipo));
             return true;
         }
         catch (ArgumentOutOfRangeException e) when (e.ParamName == "evento")
@@ -103,14 +103,14 @@ public class ArquitecturaTests
         }
     }
 
-    private static object EventoDeMuestra(Type tipo)
+    private static object SampleEvent(Type tipo)
     {
         var ctor = tipo.GetConstructors()[0];
-        var args = ctor.GetParameters().Select(p => Muestra(p.ParameterType)).ToArray();
+        var args = ctor.GetParameters().Select(p => SampleOf(p.ParameterType)).ToArray();
         return ctor.Invoke(args);
     }
 
-    private static object? Muestra(Type t)
+    private static object? SampleOf(Type t)
     {
         if (t == typeof(string)) return "";
         if (t == typeof(Entity))

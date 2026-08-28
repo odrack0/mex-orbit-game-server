@@ -13,8 +13,8 @@ public abstract record ServerEvent;
 
 // ─── entidades ──────────────────────────────────────────────────────────────
 
-public sealed record EntitySpawned(Entity Entidad) : ServerEvent;
-public sealed record EntityMoved(Entity Entidad, bool Teleport = false) : ServerEvent;
+public sealed record EntitySpawned(Entity Entity) : ServerEvent;
+public sealed record EntityMoved(Entity Entity, bool Teleport = false) : ServerEvent;
 public sealed record EntityDespawned(ulong EntityId, DespawnReason Reason) : ServerEvent;
 public sealed record EntityDestroyed(ulong EntityId, ulong KillerId) : ServerEvent;
 
@@ -28,10 +28,10 @@ public sealed record BoxDespawned(ulong BoxId, BoxDespawnReason Reason) : Server
 
 // ─── el mapa y el heroe ─────────────────────────────────────────────────────
 
-public sealed record MapEntered(MapInfo Mapa, IReadOnlyList<PortalInfo> Portales,
+public sealed record MapEntered(MapInfo Map, IReadOnlyList<PortalInfo> Portals,
     uint CargoRiskPct) : ServerEvent;
 
-public sealed record PricesPublished(IReadOnlyList<NpcPrice> Precios) : ServerEvent;
+public sealed record PricesPublished(IReadOnlyList<NpcPrice> Prices) : ServerEvent;
 
 public sealed record HeroStatsUpdated(uint Hp, uint MaxHp, uint Shield, uint MaxShield,
     uint Cargo, uint MaxCargo, ulong Credits, ulong Experience, uint Level) : ServerEvent;
@@ -42,7 +42,7 @@ public sealed record TargetAcquired(ulong EntityId, uint Hp, uint MaxHp,
 public sealed record StationRangeChanged(bool InRange, ulong StationId) : ServerEvent;
 
 public sealed record RespawnOffered(DeathCause Cause, string KillerName,
-    IReadOnlyList<RespawnChoice> Opciones) : ServerEvent;
+    IReadOnlyList<RespawnChoice> Options) : ServerEvent;
 
 public sealed record RespawnChoice(ulong OptionId, string LabelKey, ulong CostCredits, bool Available);
 
@@ -55,7 +55,7 @@ public sealed record Unloaded(ulong RequestId, IReadOnlyList<MaterialAmount> Sto
 
 public sealed record Sold(ulong RequestId, ulong CreditsGained, ulong NewCredits) : ServerEvent;
 
-public sealed record StorageSynced(IReadOnlyList<MaterialAmount> Materiales) : ServerEvent;
+public sealed record StorageSynced(IReadOnlyList<MaterialAmount> Materials) : ServerEvent;
 
 // ─── sesion y chat ──────────────────────────────────────────────────────────
 
@@ -70,4 +70,4 @@ public sealed record Failed(ulong RequestId, ErrorCode Code, string Detail = "")
 public sealed record ChatBroadcast(ChatChannel Channel, string FromName, string FromClan,
     string Text, ulong ServerTimeMs) : ServerEvent;
 
-public sealed record JumpHandedOff(string MapCode, MapServer Servidor) : ServerEvent;
+public sealed record JumpHandedOff(string MapCode, MapServer Server) : ServerEvent;

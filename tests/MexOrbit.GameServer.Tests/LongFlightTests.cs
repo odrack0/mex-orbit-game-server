@@ -14,19 +14,19 @@ using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Tests;
 
-public class VueloLargoTests
+public class LongFlightTests
 {
     /// <summary>Lo que cabe en pantalla. La camara muestra 720 unidades logicas
     /// de alto al zoom de juego (0,621), o sea 1159 de mundo; el ancho depende
     /// del aspecto. La semidiagonal en 16:9 son ~1242 unidades: dentro de ese
     /// radio, aparecer o desaparecer se VE.</summary>
-    private const double RadioEnPantalla = 1_250;
+    private const double OnScreenRadius = 1_250;
 
     /// <summary>El bestiario real del 1-1 (migraciones .1 a .10).</summary>
-    private static Mundo SectorReal()
+    private static TestWorld RealSector()
     {
-        var m = new Mundo().ConMapa(20_800, 12_800, 10_000, 6_000, 1_500);
-        foreach (var (code, hp, vel, agresivo, huye, aggro, cuantos) in new[]
+        var m = new TestWorld().WithMap(20_800, 12_800, 10_000, 6_000, 1_500);
+        foreach (var (code, hp, vel, aggressive, huye, aggro, howMany) in new[]
         {
             ("vex",     800u, (ushort)270, false, (byte)0,  500u, (ushort)15),
             ("vexor",  1_400u, (ushort)260, false, (byte)0,  500u, (ushort)8),
@@ -39,121 +39,121 @@ public class VueloLargoTests
             ("vorax",  2_200u, (ushort)270, false, (byte)30, 600u, (ushort)3),
         })
         {
-            m.ConNpc(new NpcSpawnInfo(1, code, code, hp, 0, vel, 50, agresivo, huye, aggro,
-                30, cuantos, 0, 0, 100, 30, 60));
+            m.WithNpc(new NpcSpawnInfo(1, code, code, hp, 0, vel, 50, aggressive, huye, aggro,
+                30, howMany, 0, 0, 100, 30, 60));
         }
-        return m.Construir();
+        return m.Build();
     }
 
     /// <summary>El mundo que el cliente tendria montado: se arma aplicando los
     /// frames en el mismo orden en que llegan, igual que `world.gd`.</summary>
-    private sealed class ClienteEspejo(PuertoFalso puerto)
+    private sealed class ClientMirror(FakePort port)
     {
         private int _consumidos;
         private bool _sembrando = true;
-        public readonly HashSet<ulong> Entidades = [];
-        public readonly List<string> Rarezas = [];
+        public readonly HashSet<ulong> Entities = [];
+        public readonly List<string> Oddities = [];
 
         /// <summary>La sincronizacion del Join manda todo lo que hay en rango, y
         /// eso incluye cosas a 300 unidades. No es aparecer de la nada: es
         /// acabar de entrar al mapa. Se traga sin anotar y a partir de ahi si.</summary>
-        public void Sembrar()
+        public void Seed()
         {
-            Consumir(_ => double.MaxValue);
+            Consume(_ => double.MaxValue);
             _sembrando = false;
         }
 
-        public void Consumir(Func<ulong, double> distanciaA)
+        public void Consume(Func<ulong, double> distanciaA)
         {
-            var frames = puerto.Frames;
+            var frames = port.Frames;
             for (; _consumidos < frames.Count; _consumidos++)
             {
                 var f = frames[_consumidos];
-                switch (Protocolo.MsgIdDe(f))
+                switch (Wire.MsgIdOf(f))
                 {
                     case EntitySpawn.MsgId:
                         var sp = EntitySpawn.Decode(f);
-                        Anotar(sp.EntityId, distanciaA(sp.EntityId), "aparecio");
-                        Entidades.Add(sp.EntityId);
+                        Note(sp.EntityId, distanciaA(sp.EntityId), "aparecio");
+                        Entities.Add(sp.EntityId);
                         break;
                     case EntityDespawn.MsgId:
                         var dp = EntityDespawn.Decode(f);
-                        Anotar(dp.EntityId, distanciaA(dp.EntityId), "desaparecio");
-                        Entidades.Remove(dp.EntityId);
+                        Note(dp.EntityId, distanciaA(dp.EntityId), "desaparecio");
+                        Entities.Remove(dp.EntityId);
                         break;
                     case EntityDestroyed.MsgId:
                         // reventar algo SI se ve, y debe verse: eso no es una rareza
-                        Entidades.Remove(EntityDestroyed.Decode(f).EntityId);
+                        Entities.Remove(EntityDestroyed.Decode(f).EntityId);
                         break;
                 }
             }
         }
 
-        private void Anotar(ulong id, double dist, string que)
+        private void Note(ulong id, double dist, string what)
         {
-            if (!_sembrando && dist <= RadioEnPantalla)
-                Rarezas.Add($"{id} {que} a {dist:F0} u — dentro del encuadre");
+            if (!_sembrando && dist <= OnScreenRadius)
+                Oddities.Add($"{id} {what} a {dist:F0} u — dentro del encuadre");
         }
     }
 
     [Fact]
-    public void Volando_por_el_sector_nada_aparece_ni_desaparece_dentro_del_encuadre()
+    public void Flying_the_sector_nothing_appears_or_vanishes_on_screen()
     {
-        var m = SectorReal();
-        var p = m.Entrar(1, datos: m.Piloto(1, x: 10_000, y: 6_000));
-        var espejo = new ClienteEspejo(p);
-        espejo.Sembrar();
+        var m = RealSector();
+        var p = m.Enter(1, data: m.Pilot(1, x: 10_000, y: 6_000));
+        var mirror = new ClientMirror(p);
+        mirror.Seed();
 
-        Volar(m, p, espejo, (id, _) => { });
+        Fly(m, p, mirror, (id, _) => { });
 
-        Assert.Empty(espejo.Rarezas);
+        Assert.Empty(mirror.Oddities);
     }
 
     [Fact]
-    public void Pinchar_un_bicho_que_se_esta_viendo_siempre_inicia_el_ataque()
+    public void Clicking_a_beast_you_can_see_always_starts_the_attack()
     {
         // Es el sintoma que se nota jugando: el server rechaza en silencio un
         // objetivo que no tiene por visto, el cliente cree que si lo tiene, y la
         // tecla de disparo no hace nada.
-        var m = SectorReal();
-        var p = m.Entrar(1, datos: m.Piloto(1, x: 10_000, y: 6_000));
-        var espejo = new ClienteEspejo(p);
-        espejo.Sembrar();
-        var rechazos = new List<string>();
+        var m = RealSector();
+        var p = m.Enter(1, data: m.Pilot(1, x: 10_000, y: 6_000));
+        var mirror = new ClientMirror(p);
+        mirror.Seed();
+        var rejections = new List<string>();
 
-        Volar(m, p, espejo, (id, dist) =>
+        Fly(m, p, mirror, (id, dist) =>
         {
-            var antes = p.Todos<TargetInfo>().Count;
+            var before = p.All<TargetInfo>().Count;
             m.W.Post(new SelectTargetCmd(p, id));
             m.Tick();
-            if (p.Todos<TargetInfo>().Count == antes)
-                rechazos.Add($"{id} a {dist:F0} u: el cliente lo ve y el server lo rechaza");
+            if (p.All<TargetInfo>().Count == before)
+                rejections.Add($"{id} a {dist:F0} u: el cliente lo ve y el server lo rechaza");
         });
 
-        Assert.Empty(rechazos);
+        Assert.Empty(rejections);
     }
 
     /// <summary>Cruza el sector de esquina a esquina pasando por el centro, un
     /// tick cada vez, y en cada uno deja mirar lo que acaba de recibir.</summary>
-    private static void Volar(Mundo m, PuertoFalso p, ClienteEspejo espejo,
-        Action<ulong, double> conCadaVisible)
+    private static void Fly(TestWorld m, FakePort p, ClientMirror mirror,
+        Action<ulong, double> onEachVisible)
     {
-        Vector[] ruta =
+        Vector[] route =
         [
             new(4_000, 3_000), new(16_000, 3_000), new(16_000, 9_500),
             new(4_000, 9_500), new(10_400, 6_400),
         ];
         var seq = 0ul;
 
-        foreach (var destino in ruta)
+        foreach (var destination in route)
         {
-            m.W.Post(new MoveIntentCmd(p, ++seq, (uint)destino.X, (uint)destino.Y));
+            m.W.Post(new MoveIntentCmd(p, ++seq, (uint)destination.X, (uint)destination.Y));
             for (var i = 0; i < 900; i++)
             {
                 m.Tick();
-                var nave = m.W.NaveDe(1)!;
-                espejo.Consumir(id => DistanciaA(m, nave, id));
-                if (!nave.Moving) break;
+                var ship = m.W.ShipOf(1)!;
+                mirror.Consume(id => DistanceTo(m, ship, id));
+                if (!ship.Moving) break;
 
                 // Se pincha lo que se estaria VIENDO, no lo que el cliente tenga en
                 // memoria: un bicho que quedo lejos —el objetivo seleccionado nunca
@@ -161,15 +161,15 @@ public class VueloLargoTests
                 // click, porque no esta en pantalla. Y el heroe tampoco: nadie se
                 // ficha a si mismo.
                 if (i % 25 != 0) continue;
-                var enPantalla = espejo.Entidades
-                    .Where(e => e != nave.Id && DistanciaA(m, nave, e) <= RadioEnPantalla)
+                var onScreen = mirror.Entities
+                    .Where(e => e != ship.Id && DistanceTo(m, ship, e) <= OnScreenRadius)
                     .Take(3).ToList();
-                foreach (var elegido in enPantalla)
+                foreach (var chosen in onScreen)
                 {
-                    var actual = m.W.NaveDe(1)!;
-                    espejo.Consumir(id => DistanciaA(m, actual, id));
-                    if (!espejo.Entidades.Contains(elegido)) continue;
-                    conCadaVisible(elegido, DistanciaA(m, actual, elegido));
+                    var actual = m.W.ShipOf(1)!;
+                    mirror.Consume(id => DistanceTo(m, actual, id));
+                    if (!mirror.Entities.Contains(chosen)) continue;
+                    onEachVisible(chosen, DistanceTo(m, actual, chosen));
                 }
             }
         }
@@ -177,9 +177,9 @@ public class VueloLargoTests
 
     /// <summary>Distancia del heroe a una entidad; `MaxValue` si ya no existe
     /// (murio o se fue), que es justo cuando no hay nada que reprochar.</summary>
-    private static double DistanciaA(Mundo m, Entity nave, ulong id) =>
-        m.W.NpcsVivos.TryGetValue(id, out var e)
-            ? Geometria.Distancia(nave, e)
+    private static double DistanceTo(TestWorld m, Entity ship, ulong id) =>
+        m.W.LiveNpcs.TryGetValue(id, out var e)
+            ? Geometry.Distance(ship, e)
             : double.MaxValue;
 
     private readonly record struct Vector(int X, int Y);

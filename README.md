@@ -41,6 +41,27 @@ bodega y cajas, base con descarga y venta, reconexión con ventana de gracia, ch
 sector, con relevancia por rango. Repartido en cinco proyectos (ver **Arquitectura**) y 83
 pruebas de caracterización.
 
+## Convenciones de codigo
+
+> **Codigo en ingles, comentarios en español.** Esta es la regla del repo, y lleva
+> frontera propia porque sin ella se cuela sola.
+
+| Que | Idioma | Por que |
+|---|---|---|
+| Tipos, metodos, propiedades, campos, **parametros y variables locales** | ingles | Es codigo. Un `presa` entre `prey` y `target` es exactamente el ruido que la regla evita |
+| **Nombres de prueba** (`The_shield_absorbs_before_the_hull`) | ingles | Tambien son codigo. Aqui estuvo la duda y se cerro a proposito: una excepcion "porque se leen como frases" habria dejado la frontera al gusto de cada uno |
+| Nombres de archivo | ingles | Siguen al tipo que contienen |
+| Comentarios y `<summary>` | **español** | Son la documentacion, y esa va en español |
+| Mensajes de log y de error | **español** | Los lee una persona, no un compilador |
+| Esquema de BD y `@parametros` de Dapper | ingles | Los fija `mex-orbit-data-base`; Dapper enlaza por el NOMBRE de la propiedad, asi que renombrar una variable rompe su `@parametro` sin que el compilador diga nada |
+| Campos del protocolo | ingles | Los genera `mex-orbit-protocol` desde el esquema |
+
+Renombrar en masa con un `sed` a pelo **no vale**: destroza justo la mitad que hay
+que conservar —convierte "Mapa sin estacion" en "Map sin estacion"— y se mete
+dentro de las SQL multilinea dejando los `@parametros` a medias. Si hay que hacer
+una pasada grande, el barrido tiene que partir cada linea en tramos (codigo,
+cadena, comentario) y tocar solo los de codigo.
+
 ## Arquitectura
 
 **Cebolla de cinco proyectos.** La direccion de las dependencias la impone el compilador, no
@@ -64,13 +85,13 @@ ni al protocolo, ni al logging— y cada capa de fuera solo puede apuntar hacia 
                                      │
                      ┌───────────────▼──────────────┐
                      │           Domain             │   reglas del juego
-                     │  Entity · NpcAi · Diales     │   (cero dependencias)
+                     │  Entity · NpcAi · Dials      │   (cero dependencias)
                      └──────────────────────────────┘
 ```
 
 | Proyecto | Que vive ahi | Que NO puede saber |
 |---|---|---|
-| `Domain` | `Entity`, `NpcAi`, `Diales`, `Reglas` (combate, botin, geometria), los modelos del juego | Que existe una BD, un socket o un protocolo binario |
+| `Domain` | `Entity`, `NpcAi`, `Dials`, `Rules` (combate, botin, geometria), los modelos del juego | Que existe una BD, un socket o un protocolo binario |
 | `Application` | `World` (el tick), `Universe` (los mapas), `Handshake`, los **puertos** y los **eventos** | Que la BD es MySQL o que el cable es protobuf-like |
 | `Infrastructure` | Los seis repositorios Dapper/MySQL, el verificador Ed25519, el reloj | Nada del juego que no venga por un puerto |
 | `Protocol` | El `ServerCodec` y el lector de frames. El **unico** que compila `Messages.g.cs` | Las reglas del juego |
@@ -169,21 +190,21 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 |---|---|---|---|
 | `TickMs` | `appsettings.json` | 80 ms | Tick fijo de simulacion (12.5 Hz, herencia del prototipo) |
 | `PingIntervalSeconds` y `PingMissesToDrop` | `appsettings.json` | 10 s, 3 fallos | Heartbeat: 3 pings sin Pong = socket muerto |
-| `LaserRange` | `Domain/Diales.cs` | 600 | Alcance del laser; fuera de rango el laser espera, no se apaga |
-| `AttackIntervalMs` | `Domain/Diales.cs` | 500 ms | Cadencia de golpe (con ION-1 de 60: 120 dps, TTK del Vex ~10 s) |
-| `CollectRange` | `Domain/Diales.cs` | 250 | Distancia maxima para recolectar una caja |
-| `BoxTtlMs` | `Domain/Diales.cs` | 150 s | Vida de la caja (2-3 min, guidelines seccion 7) |
-| Write-behind | `Domain/Diales.cs` | 30 s | Cadencia maxima de persistencia de player_ship_state |
+| `LaserRange` | `Domain/Dials.cs` | 600 | Alcance del laser; fuera de rango el laser espera, no se apaga |
+| `AttackIntervalMs` | `Domain/Dials.cs` | 500 ms | Cadencia de golpe (con ION-1 de 60: 120 dps, TTK del Vex ~10 s) |
+| `CollectRange` | `Domain/Dials.cs` | 250 | Distancia maxima para recolectar una caja |
+| `BoxTtlMs` | `Domain/Dials.cs` | 150 s | Vida de la caja (2-3 min, guidelines seccion 7) |
+| Write-behind | `Domain/Dials.cs` | 30 s | Cadencia maxima de persistencia de player_ship_state |
 | Deambular de NPCs | `Domain/NpcAi.cs` | destino en todo el mapa | Sustituido por la IA portada del legado (ver abajo): ya no es un tembleque de radio 800 |
 | Rango de la estacion | BD `map_station.secure_range` | 1500 | Dentro de este radio se puede descargar y vender (dato, no constante) |
-| `GraceMs` | `Domain/Diales.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
-| `ChatMaxLen` | `Domain/Diales.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
-| `AiThinkMs` | `Domain/Diales.cs` | 1 s | Cada cuanto PIENSA un NPC (el legado tambien pensaba 1 vez por segundo) |
-| `NpcAttackIntervalMs` | `Domain/Diales.cs` | 1 s | Cadencia de disparo del NPC |
-| `NpcAttackRange` | `Domain/Diales.cs` | 600 | Alcance de su laser (igual que el del jugador) |
-| `AproximacionRadio` | `Domain/Diales.cs` | 300 | A que distancia se planta junto a su presa (`ALIEN_DISTANCE_TO_USER` del legado) |
-| `DesaggroFactor` | `Domain/Diales.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
-| `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Domain/Diales.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
+| `GraceMs` | `Domain/Dials.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
+| `ChatMaxLen` | `Domain/Dials.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
+| `AiThinkMs` | `Domain/Dials.cs` | 1 s | Cada cuanto PIENSA un NPC (el legado tambien pensaba 1 vez por segundo) |
+| `NpcAttackIntervalMs` | `Domain/Dials.cs` | 1 s | Cadencia de disparo del NPC |
+| `NpcAttackRange` | `Domain/Dials.cs` | 600 | Alcance de su laser (igual que el del jugador) |
+| `AproximacionRadio` | `Domain/Dials.cs` | 300 | A que distancia se planta junto a su presa (`ALIEN_DISTANCE_TO_USER` del legado) |
+| `DesaggroFactor` | `Domain/Dials.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
+| `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Domain/Dials.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
 | Aggro y agresividad | BD `npc_catalog.aggro_radius` / `is_aggressive` | 500-700 · solo el Ferox | Datos, no constantes: el radio y si caza son del catalogo |
 | Daño del NPC | BD `npc_catalog.damage` | 25-85 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
 | Huida | BD `npc_catalog.flee_hp_pct` | 30 solo en el Vorax | Debajo de ese % de casco, el bicho se larga |
@@ -191,9 +212,9 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | Relevancia de entidades | BD `server_setting.render_range_entities` | 2000 | A que distancia el cliente empieza a recibir naves y NPCs |
 | Relevancia de cajas | BD `server_setting.render_range_objects` | 1250 | Lo mismo para las cajas: mobiliario menudo, rango mas corto |
 | Histeresis de relevancia | BD `server_setting.render_range_hysteresis_pct` | 10 % | Margen extra para SALIR; 0 = un solo umbral, como el legado |
-| `HuidaMs` / `HuidaDistancia` | `Domain/Diales.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
-| `JumpRange` | `Domain/Diales.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
-| `MargenDelMapa` | `Domain/Diales.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |
+| `HuidaMs` / `HuidaDistancia` | `Domain/Dials.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
+| `JumpRange` | `Domain/Dials.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
+| `MargenDelMapa` | `Domain/Dials.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |
 
 ## La IA de los NPCs
 

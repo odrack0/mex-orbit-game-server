@@ -27,38 +27,38 @@ var app = builder.Build();
 var logs = app.Services.GetRequiredService<ILoggerFactory>();
 
 // ─── los adaptadores concretos ──────────────────────────────────────────────
-var mapas = new MapCatalog(conn);
-var catalogo = new GameCatalog(conn);
-var ajustes = new ServerSettings(conn);
-var jugadores = new PlayerRepository(conn);
-var sesiones = new SessionRepository(conn);
-var economia = new EconomyRepository(conn);
+var maps = new MapCatalog(conn);
+var catalog = new GameCatalog(conn);
+var settings = new ServerSettings(conn);
+var players = new PlayerRepository(conn);
+var sessions = new SessionRepository(conn);
+var economy = new EconomyRepository(conn);
 var codec = new ServerCodec();
-var reloj = new SystemClock();
-var verificador = new Ed25519TicketVerifier(pubKeyPath);
+var clock = new SystemClock();
+var verifier = new Ed25519TicketVerifier(pubKeyPath);
 
 // diales de JUEGO, no de despliegue: viven en server_setting con su auditoria
-var npcCombat = ajustes.LoadBoolSetting("npc_combat_enabled", true);
+var npcCombat = settings.LoadBoolSetting("npc_combat_enabled", true);
 // A que distancia el cliente empieza —y deja— de saber que algo existe. La spec
 // del protocolo fija los valores iniciales y dice que son calibrables en BD; si
 // las filas faltan se usan los de respaldo y el server arranca igual.
-var rangos = new RangosDeRelevancia(
-    ajustes.LoadIntSetting("render_range_entities", (int)RangosDeRelevancia.PorDefecto.Entidades),
-    ajustes.LoadIntSetting("render_range_objects", (int)RangosDeRelevancia.PorDefecto.Objetos),
-    (byte)ajustes.LoadIntSetting("render_range_hysteresis_pct",
-        RangosDeRelevancia.PorDefecto.HisteresisPct));
+var ranges = new RelevanceRanges(
+    settings.LoadIntSetting("render_range_entities", (int)RelevanceRanges.Fallback.Entities),
+    settings.LoadIntSetting("render_range_objects", (int)RelevanceRanges.Fallback.Objects),
+    (byte)settings.LoadIntSetting("render_range_hysteresis_pct",
+        RelevanceRanges.Fallback.HysteresisPct));
 
 // ─── la simulacion ──────────────────────────────────────────────────────────
 // Los mapas se levantan cuando alguien entra, no al arrancar: 29 mapas serian
 // 29 consultas y 29 poblaciones de NPC antes de que exista un solo jugador.
-var universo = new Universe(mapas, catalogo, jugadores, sesiones, economia, codec, reloj, rangos,
+var universe = new Universe(maps, catalog, players, sessions, economy, codec, clock, ranges,
     logs, tickMs, pingInterval, pingMisses, npcCombat);
-var mapa = universo.Inicial().Mapa;
-var handshake = new Handshake(universo, jugadores, sesiones, verificador, codec, reloj,
+var map = universe.Starter().Map;
+var handshake = new Handshake(universe, players, sessions, verifier, codec, clock,
     protocolVersion, tickMs);
 
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-_ = Task.Run(() => universo.RunAsync(lifetime.ApplicationStopping));
+_ = Task.Run(() => universe.RunAsync(lifetime.ApplicationStopping));
 
 app.UseWebSockets();
 app.Map("/ws", async context =>
@@ -71,12 +71,12 @@ app.Map("/ws", async context =>
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
     await new WebSocketConnection(socket, handshake, codec).RunAsync();
 });
-app.MapGet("/health", () => Results.Ok(new { status = "ok", map = mapa.Code }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok", map = map.Code }));
 
 app.Logger.LogInformation("game server listo: entrada {code} ({x}x{y}), tick {tick} ms, clave publica {key}",
-    mapa.Code, mapa.BoundsX, mapa.BoundsY, tickMs, pubKeyPath);
+    map.Code, map.BoundsX, map.BoundsY, tickMs, pubKeyPath);
 // se anuncian como el resto de diales de BD: cambiarlos pide reiniciar, y el log
 // de arranque es donde se comprueba con que numeros esta corriendo de verdad
 app.Logger.LogInformation("relevancia por rango: entidades {e} u · cajas {c} u · histeresis {h}%",
-    rangos.Entidades, rangos.Objetos, rangos.HisteresisPct);
+    ranges.Entities, ranges.Objects, ranges.HysteresisPct);
 app.Run();

@@ -11,17 +11,17 @@
 // respaldo: un dial ausente jamas debe tumbar el arranque.
 namespace MexOrbit.GameServer.Domain;
 
-public sealed record RangosDeRelevancia(double Entidades, double Objetos, byte HisteresisPct)
+public sealed record RelevanceRanges(double Entities, double Objects, byte HysteresisPct)
 {
     /// <summary>Los valores iniciales que fija la spec, por si las filas de
     /// `server_setting` no estan.</summary>
-    public static readonly RangosDeRelevancia PorDefecto = new(2_000, 1_250, 10);
+    public static readonly RelevanceRanges Fallback = new(2_000, 1_250, 10);
 
-    private double ConMargen(double rango) => rango * (1 + HisteresisPct / 100.0);
+    private double WithMargin(double range) => range * (1 + HysteresisPct / 100.0);
 
     /// <summary>El umbral que toca segun si el cliente YA sabia de ello. Se entra
     /// al rango justo y se sale al rango con margen: esa banda es la histeresis.</summary>
-    public double UmbralEntidad(bool yaVisto) => yaVisto ? ConMargen(Entidades) : Entidades;
+    public double EntityThreshold(bool alreadySeen) => alreadySeen ? WithMargin(Entities) : Entities;
 
-    public double UmbralObjeto(bool yaVisto) => yaVisto ? ConMargen(Objetos) : Objetos;
+    public double ObjectThreshold(bool alreadySeen) => alreadySeen ? WithMargin(Objects) : Objects;
 }

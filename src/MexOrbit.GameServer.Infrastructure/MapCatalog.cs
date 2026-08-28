@@ -6,7 +6,7 @@ using MexOrbit.GameServer.Domain;
 namespace MexOrbit.GameServer.Infrastructure;
 
 public sealed class MapCatalog(string connectionString)
-    : MySqlRepositorio(connectionString), IMapCatalog
+    : MySqlRepository(connectionString), IMapCatalog
 {
     public MapInfo LoadStarterMap()
     {
@@ -22,7 +22,7 @@ public sealed class MapCatalog(string connectionString)
 
     /// <summary>Un mapa por su id. Lo usa la reconexion para saber a que mundo
     /// devolver al jugador.</summary>
-    public MapInfo? LoadMapPorId(long mapId)
+    public MapInfo? LoadMapById(long mapId)
     {
         using var db = Open();
         var code = db.ExecuteScalar<string?>("SELECT code FROM map WHERE id = @mapId", new { mapId });

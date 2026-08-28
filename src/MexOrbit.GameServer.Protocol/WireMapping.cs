@@ -9,18 +9,18 @@ using W = MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Protocol;
 
-internal static class Traduccion
+internal static class WireMapping
 {
     // ─── saliente: dominio -> cable ─────────────────────────────────────────
 
-    public static W.EntityKind AlCable(D.EntityKind v) => v switch
+    public static W.EntityKind ToWire(D.EntityKind v) => v switch
     {
         D.EntityKind.Player => W.EntityKind.Player,
         D.EntityKind.Npc => W.EntityKind.Npc,
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "EntityKind sin traduccion"),
     };
 
-    public static W.DespawnReason AlCable(D.DespawnReason v) => v switch
+    public static W.DespawnReason ToWire(D.DespawnReason v) => v switch
     {
         D.DespawnReason.Range => W.DespawnReason.Range,
         D.DespawnReason.Left => W.DespawnReason.Left,
@@ -28,7 +28,7 @@ internal static class Traduccion
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "DespawnReason sin traduccion"),
     };
 
-    public static W.BoxDespawnReason AlCable(D.BoxDespawnReason v) => v switch
+    public static W.BoxDespawnReason ToWire(D.BoxDespawnReason v) => v switch
     {
         D.BoxDespawnReason.Collected => W.BoxDespawnReason.Collected,
         D.BoxDespawnReason.Expired => W.BoxDespawnReason.Expired,
@@ -36,20 +36,20 @@ internal static class Traduccion
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "BoxDespawnReason sin traduccion"),
     };
 
-    public static W.Weapon AlCable(D.Weapon v) => v switch
+    public static W.Weapon ToWire(D.Weapon v) => v switch
     {
         D.Weapon.Laser => W.Weapon.Laser,
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "Weapon sin traduccion"),
     };
 
-    public static W.DeathCause AlCable(D.DeathCause v) => v switch
+    public static W.DeathCause ToWire(D.DeathCause v) => v switch
     {
         D.DeathCause.Npc => W.DeathCause.Npc,
         D.DeathCause.Player => W.DeathCause.Player,
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "DeathCause sin traduccion"),
     };
 
-    public static W.ChatChannel AlCable(D.ChatChannel v) => v switch
+    public static W.ChatChannel ToWire(D.ChatChannel v) => v switch
     {
         D.ChatChannel.Global => W.ChatChannel.Global,
         D.ChatChannel.Faction => W.ChatChannel.Faction,
@@ -57,7 +57,7 @@ internal static class Traduccion
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "ChatChannel sin traduccion"),
     };
 
-    public static W.ErrorCode AlCable(D.ErrorCode v) => v switch
+    public static W.ErrorCode ToWire(D.ErrorCode v) => v switch
     {
         D.ErrorCode.Generic => W.ErrorCode.Generic,
         D.ErrorCode.BadTicket => W.ErrorCode.BadTicket,
@@ -74,7 +74,7 @@ internal static class Traduccion
 
     // ─── entrante: cable -> dominio ─────────────────────────────────────────
 
-    public static D.ChatChannel AlDominio(W.ChatChannel v) => v switch
+    public static D.ChatChannel ToDomain(W.ChatChannel v) => v switch
     {
         W.ChatChannel.Global => D.ChatChannel.Global,
         W.ChatChannel.Faction => D.ChatChannel.Faction,
@@ -86,5 +86,5 @@ internal static class Traduccion
 
     /// <summary>Las coordenadas viajan enteras: el mundo simula en doubles y el
     /// cable no necesita esa precision.</summary>
-    public static ulong Redondear(double v) => (ulong)Math.Round(Math.Max(0, v));
+    public static ulong Round(double v) => (ulong)Math.Round(Math.Max(0, v));
 }

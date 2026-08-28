@@ -6,7 +6,7 @@ using MexOrbit.GameServer.Domain;
 namespace MexOrbit.GameServer.Infrastructure;
 
 public sealed class PlayerRepository(string connectionString)
-    : MySqlRepositorio(connectionString), IPlayerRepository
+    : MySqlRepository(connectionString), IPlayerRepository
 {
     public PlayerData? LoadPlayer(long accountId)
     {

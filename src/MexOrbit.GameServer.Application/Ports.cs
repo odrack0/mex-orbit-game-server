@@ -14,7 +14,7 @@ public interface IMapCatalog
 {
     MapInfo LoadStarterMap();
     MapInfo? LoadMap(string code);
-    MapInfo? LoadMapPorId(long mapId);
+    MapInfo? LoadMapById(long mapId);
     MapServer? LoadMapServer(long mapId);
     List<PortalInfo> LoadPortals(long mapId);
 }
@@ -32,8 +32,8 @@ public interface IGameCatalog
 /// <summary>Los diales de JUEGO que viven en BD con su auditoria, no en appsettings.</summary>
 public interface IServerSettings
 {
-    bool LoadBoolSetting(string key, bool porDefecto);
-    int LoadIntSetting(string key, int porDefecto);
+    bool LoadBoolSetting(string key, bool fallback);
+    int LoadIntSetting(string key, int fallback);
 }
 
 /// <summary>El jugador y su nave: lo que se lee al entrar y la unica escritura
@@ -65,7 +65,7 @@ public interface IEconomyRepository
     void ClearCargo(long accountId, long boxRef);
     void AddCredits(long accountId, decimal delta, string reason, long? refId = null);
     List<(string LootId, decimal Amount)> LoadStorage(long accountId);
-    UnloadOutcome UnloadAndRefine(long accountId, RefineRecipe? receta);
+    UnloadOutcome UnloadAndRefine(long accountId, RefineRecipe? recipe);
     (uint Sold, decimal Gained, decimal NewCredits) SellToNpc(
         long accountId, long itemId, uint amount, decimal price);
 }
@@ -88,7 +88,7 @@ public interface IClientPort
 /// serializaciones por evento.</summary>
 public interface IServerCodec
 {
-    byte[] Encode(ServerEvent evento);
+    byte[] Encode(ServerEvent serverEvent);
 }
 
 /// <summary>Verificacion del game ticket emitido por la api. El game server solo

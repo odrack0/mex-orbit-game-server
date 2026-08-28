@@ -38,14 +38,14 @@ public sealed class Entity
         var dx = TargetX - X;
         var dy = TargetY - Y;
         var dist = Math.Sqrt(dx * dx + dy * dy);
-        var paso = Speed * dtSeconds;
-        if (paso >= dist) { X = TargetX; Y = TargetY; }
-        else { X += dx / dist * paso; Y += dy / dist * paso; }
+        var step = Speed * dtSeconds;
+        if (step >= dist) { X = TargetX; Y = TargetY; }
+        else { X += dx / dist * step; Y += dy / dist * step; }
         return true;
     }
 
     /// <summary>La planta donde este. Lo usa el golpe: frena en seco.</summary>
-    public void Detener()
+    public void Stop()
     {
         TargetX = X;
         TargetY = Y;

@@ -4,11 +4,12 @@
 // el loop — cada tick esta blindado y el error se loguea con contexto.
 //
 // Esta clase esta partida en varios archivos por MOTIVO, no por tamaño:
-//   · World.cs         el bucle, el estado y las tuberias
-//   · World.Npcs.cs    la maquina de estados de la IA y su combate
-//   · World.Combate.cs el laser del jugador, la muerte y la reaparicion
-//   · World.Bodega.cs  cajas, la base, descarga y venta
-//   · World.Sesion.cs  entrar, volver, salir, moverse, hablar y saltar
+//   · World.cs           el bucle, el estado y las tuberias
+//   · World.Npcs.cs      la maquina de estados de la IA y su combate
+//   · World.Combat.cs    el laser del jugador, la muerte y la reaparicion
+//   · World.Cargo.cs     cajas, la base, descarga y venta
+//   · World.Session.cs   entrar, volver, salir, moverse, hablar y saltar
+//   · World.Relevance.cs el diff de visibilidad y la difusion dirigida
 using System.Threading.Channels;
 using MexOrbit.GameServer.Domain;
 using Microsoft.Extensions.Logging;
@@ -19,7 +20,7 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     List<MaterialBias> zoneBias, RefineRecipe? refineRecipe, List<NpcPrice> npcPrices,
     List<PortalInfo> portals,
     IPlayerRepository players, ISessionRepository sessions, IEconomyRepository economy,
-    IServerCodec codec, IClock clock, RangosDeRelevancia rangos, ILogger<World> log,
+    IServerCodec codec, IClock clock, RelevanceRanges ranges, ILogger<World> log,
     int tickMs, int pingIntervalSeconds, int pingMissesToDrop, bool npcCombatEnabled = true)
 {
     private readonly Channel<WorldCmd> _inbox = Channel.CreateUnbounded<WorldCmd>();
@@ -45,22 +46,22 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         public required Dictionary<long, uint> Cargo;   // server_item_id -> unidades
         public long NextAttackTick;
         public decimal Credits;
-        public bool EnBase;                              // dentro del rango de la estacion
+        public bool AtStation;                              // dentro del rango de la estacion
         public string AmmoId = "ammo_cel_1";             // municion equipada (E3 la hara elegible)
         public bool Skilled;                             // disparo potenciado (perfil de piloto, E4)
         /// <summary>Ya se le dijo que su objetivo esta fuera del alcance del laser.
         /// Se avisa UNA vez por espera, no una vez por tick.</summary>
-        public bool AvisadoFueraDeAlcance;
+        public bool WarnedOutOfRange;
         /// <summary>Tick en que expira la gracia; long.MaxValue = socket vivo.</summary>
         public long GraceUntilTick = long.MaxValue;
-        public bool Desconectado => GraceUntilTick != long.MaxValue;
+        public bool Disconnected => GraceUntilTick != long.MaxValue;
         /// <summary>Destruido y esperando a elegir reaparicion: ni vuela ni dispara.</summary>
-        public bool Muerto;
+        public bool Dead;
         public uint CargoUsed => (uint)Cargo.Values.Sum(v => (long)v);
         /// <summary>Lo que el CLIENTE de este jugador cree que existe. La
         /// relevancia es un diff contra estos dos conjuntos.</summary>
-        public readonly HashSet<ulong> Vistas = [];
-        public readonly HashSet<ulong> CajasVistas = [];
+        public readonly HashSet<ulong> SeenEntities = [];
+        public readonly HashSet<ulong> SeenBoxes = [];
     }
 
     private readonly Dictionary<long, PlayerSlot> _players = new();     // account_id -> slot
@@ -84,7 +85,7 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     public void Post(WorldCmd cmd) => _inbox.Writer.TryWrite(cmd);
 
     /// <summary>Los milisegundos de un dial, en ticks de este mundo.</summary>
-    private int EnTicks(int ms) => ms / tickMs;
+    private int ToTicks(int ms) => ms / tickMs;
 
     /// <summary>Un paso de simulacion. Lo llama el <see cref="Universe"/>, que lleva
     /// UN bucle para todos los mapas: 29 temporizadores para 28 mapas vacios seria
@@ -107,18 +108,18 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     /// al que alguien acaba de entrar sigue vacio —el Join esta en la cola, sin
     /// procesar— asi que no se tickearia, asi que el Join no se procesaria nunca.
     /// Un mundo que se niega a despertar para atender lo que le despertaria.</summary>
-    internal bool Ocioso => _players.Count == 0 && _inbox.Reader.Count == 0;
+    internal bool Idle => _players.Count == 0 && _inbox.Reader.Count == 0;
 
     /// <summary>El mapa que simula. Publico porque el host lo necesita para el
     /// `/health` y el log de arranque.</summary>
-    public MapInfo Mapa => map;
+    public MapInfo Map => map;
 
     // ─── ventanas de inspeccion (solo para las pruebas; `internal`, no API) ──
-    internal IReadOnlyDictionary<ulong, Entity> NpcsVivos => _npcs;
-    internal Entity? NaveDe(long accountId) =>
+    internal IReadOnlyDictionary<ulong, Entity> LiveNpcs => _npcs;
+    internal Entity? ShipOf(long accountId) =>
         _players.TryGetValue(accountId, out var s) ? s.Entity : null;
-    internal IReadOnlyCollection<ulong> CajasVivas => _boxes.Keys;
-    internal long TickActual => _tick;
+    internal IReadOnlyCollection<ulong> LiveBoxes => _boxes.Keys;
+    internal long CurrentTick => _tick;
 
     private void Tick(double dt)
     {
@@ -127,23 +128,23 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         // NPCs: la maquina de estados del legado (vagabundear / perseguir / pegar)
         foreach (var npc in _npcs.Values.ToList())
         {
-            PensarNpc(npc);
+            ThinkNpc(npc);
             npc.Step(dt);
         }
         foreach (var slot in _players.Values)
         {
             slot.Entity.Step(dt);
-            ActualizarRangoBase(slot);
+            UpdateStationRange(slot);
         }
 
-        DispararLaseres();
-        ExpirarCajas();
-        ReaparecerNpcs();
-        BarrerGraciasAgotadas();
+        FireLasers();
+        ExpireBoxes();
+        RespawnNpcs();
+        SweepExpiredGraces();
         // el diff de visibilidad va al FINAL: para entonces todo se movio, se
         // murio y se reaparecio, asi que se calcula una sola vez sobre el
         // estado ya estable del tick
-        ActualizarRelevancia();
+        UpdateRelevance();
         Heartbeat();
         WriteBehind();
     }
@@ -153,7 +154,7 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         switch (cmd)
         {
             case JoinCmd join: OnJoin(join); break;
-            case JumpCmd salto: OnJump(salto); break;
+            case JumpCmd jump: OnJump(jump); break;
             case LeaveCmd leave: OnLeave(leave); break;
             case MoveIntentCmd move: OnMoveIntent(move); break;
             case PongCmd pong: OnPong(pong); break;
@@ -171,13 +172,13 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     // ─── las fases del tick ─────────────────────────────────────────────────
 
     /// <summary>Laser encendido + objetivo vivo + en rango = un golpe por intervalo.</summary>
-    private void DispararLaseres()
+    private void FireLasers()
     {
         foreach (var slot in _players.Values)
         {
             if (!slot.LaserOn || _tick < slot.NextAttackTick) continue;
             if (!_npcs.TryGetValue(slot.TargetId, out var npc)) { slot.LaserOn = false; continue; }
-            if (Geometria.Distancia(npc, slot.Entity) > Diales.LaserRange)
+            if (Geometry.Distance(npc, slot.Entity) > Dials.LaserRange)
             {
                 // Fuera de rango el laser ESPERA, no se apaga. Pero esperar en
                 // SILENCIO era el peor de los mundos: la pantalla mide 2198x1159
@@ -185,37 +186,37 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
                 // que se VE esta fuera de tiro. Pinchabas, disparabas, y no pasaba
                 // nada — sin decir por que, y funcionando o no segun DONDE en la
                 // pantalla estuviera el bicho.
-                if (!slot.AvisadoFueraDeAlcance)
+                if (!slot.WarnedOutOfRange)
                 {
-                    slot.AvisadoFueraDeAlcance = true;
+                    slot.WarnedOutOfRange = true;
                     // requestId 0: no es la respuesta a nada que pidiera el
                     // cliente, es el server contandole algo por su cuenta
-                    Enviar(slot, new Failed(0, ErrorCode.TooFar, "Fuera de alcance: acercate"));
+                    Send(slot, new Failed(0, ErrorCode.TooFar, "Fuera de alcance: acercate"));
                 }
                 continue;
             }
-            slot.AvisadoFueraDeAlcance = false;
-            slot.NextAttackTick = _tick + EnTicks(Diales.AttackIntervalMs);
-            AplicarDanio(slot, npc);
+            slot.WarnedOutOfRange = false;
+            slot.NextAttackTick = _tick + ToTicks(Dials.AttackIntervalMs);
+            ApplyDamage(slot, npc);
         }
     }
 
-    private void ExpirarCajas()
+    private void ExpireBoxes()
     {
-        if (_tick % EnTicks(1_000) != 0) return;
-        foreach (var caja in _boxes.Values.Where(b => _tick >= b.ExpiraTick).ToList())
+        if (_tick % ToTicks(1_000) != 0) return;
+        foreach (var box in _boxes.Values.Where(b => _tick >= b.ExpiraTick).ToList())
         {
-            _boxes.Remove(caja.Id);
-            AQuienesVenCaja(caja.Id, new BoxDespawned(caja.Id, BoxDespawnReason.Expired));
-            OlvidarCaja(caja.Id);
+            _boxes.Remove(box.Id);
+            ToThoseWhoSeeBox(box.Id, new BoxDespawned(box.Id, BoxDespawnReason.Expired));
+            ForgetBox(box.Id);
         }
     }
 
-    private void ReaparecerNpcs()
+    private void RespawnNpcs()
     {
-        foreach (var (cuando, info, id) in _respawns.Where(r => _tick >= r.Tick).ToList())
+        foreach (var (when, info, id) in _respawns.Where(r => _tick >= r.Tick).ToList())
         {
-            _respawns.Remove((cuando, info, id));
+            _respawns.Remove((when, info, id));
             // no se anuncia aqui: quien lo tenga cerca lo recibira en el paso de
             // relevancia de este mismo tick
             SpawnNpc(info, id);
@@ -223,10 +224,10 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     }
 
     /// <summary>Gracia agotada: la nave sale del mundo y la sesion se cierra.</summary>
-    private void BarrerGraciasAgotadas()
+    private void SweepExpiredGraces()
     {
         foreach (var slot in _players.Values
-                     .Where(s => s.Desconectado && _tick >= s.GraceUntilTick).ToList())
+                     .Where(s => s.Disconnected && _tick >= s.GraceUntilTick).ToList())
         {
             log.LogInformation("cuenta {id}: gracia agotada, saliendo del mundo", slot.Data.AccountId);
             Drop(slot, "TIMEOUT");
@@ -240,31 +241,31 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         var pingCadaTicks = pingIntervalSeconds * 1000 / tickMs;
         foreach (var slot in _players.Values.ToList())
         {
-            if (slot.Desconectado) continue;      // sin socket no hay a quien pingear
+            if (slot.Disconnected) continue;      // sin socket no hay a quien pingear
             if (_tick - slot.LastPingTick < pingCadaTicks) continue;
             if (slot.PingMisses >= pingMissesToDrop)
             {
                 log.LogInformation("cuenta {id}: {n} pings sin respuesta, abriendo gracia",
                     slot.Data.AccountId, slot.PingMisses);
                 slot.Port.CloseSocket();
-                slot.GraceUntilTick = _tick + EnTicks(Diales.GraceMs);
+                slot.GraceUntilTick = _tick + ToTicks(Dials.GraceMs);
                 slot.LaserOn = false;
                 continue;
             }
             slot.PingNonce = (ulong)_rng.NextInt64(1, long.MaxValue);
             slot.PingMisses++;
             slot.LastPingTick = _tick;
-            Enviar(slot, new Pinged(slot.PingNonce));
+            Send(slot, new Pinged(slot.PingNonce));
         }
     }
 
     /// <summary>Persistencia diferida del estado en vivo, fuera del hilo del tick.</summary>
     private void WriteBehind()
     {
-        if (_tick % EnTicks(Diales.WriteBehindMs) != 0) return;
+        if (_tick % ToTicks(Dials.WriteBehindMs) != 0) return;
         foreach (var slot in _players.Values)
         {
-            GuardarNave(slot);
+            SaveShip(slot);
             var sid = slot.SessionId;
             _ = Task.Run(() => Safe(() => sessions.TouchSession(sid), "TouchSession"));
         }
@@ -273,36 +274,36 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     // ─── tuberias ───────────────────────────────────────────────────────────
 
     /// <summary>Un evento a un jugador. El codec traduce; el mundo no sabe a que.</summary>
-    private void Enviar(PlayerSlot slot, ServerEvent evento) => slot.Port.Send(codec.Encode(evento));
+    private void Send(PlayerSlot slot, ServerEvent serverEvent) => slot.Port.Send(codec.Encode(serverEvent));
 
-    private void Enviar(IClientPort port, ServerEvent evento) => port.Send(codec.Encode(evento));
+    private void Send(IClientPort port, ServerEvent serverEvent) => port.Send(codec.Encode(serverEvent));
 
     private void Despawn(ulong entityId, DespawnReason reason)
     {
-        AQuienesVen(entityId, new EntityDespawned(entityId, reason));
-        OlvidarEntidad(entityId);
+        ToThoseWhoSee(entityId, new EntityDespawned(entityId, reason));
+        ForgetEntity(entityId);
     }
 
-    private PlayerSlot? SlotDe(IClientPort port) =>
+    private PlayerSlot? SlotOf(IClientPort port) =>
         _players.Values.FirstOrDefault(s => ReferenceEquals(s.Port, port));
 
-    private HeroStatsUpdated HeroStatsDe(PlayerSlot slot) => new(
+    private HeroStatsUpdated HeroStatsOf(PlayerSlot slot) => new(
         slot.Entity.Hp, slot.Entity.MaxHp, slot.Entity.Shield, slot.Entity.MaxShield,
         slot.CargoUsed, slot.Data.CargoCapacity, (ulong)slot.Credits, 0, 1);
 
     /// <summary>La UNICA escritura caliente del server (esquema-v1 §5). Se copian
     /// los valores ANTES de soltar la tarea: leer el slot desde otro hilo seria
     /// justo la clase de carrera que este server no puede permitirse.</summary>
-    private void GuardarNave(PlayerSlot slot)
+    private void SaveShip(PlayerSlot slot)
     {
         var (id, mapId, x, y, hp, esc) = (slot.Data.AccountId, map.Id,
             (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield);
         _ = Task.Run(() => Safe(() => players.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
     }
 
-    private void Safe(Action accion, string que)
+    private void Safe(Action action, string what)
     {
-        try { accion(); }
-        catch (Exception ex) { log.LogError(ex, "fallo en {que}", que); }
+        try { action(); }
+        catch (Exception ex) { log.LogError(ex, "fallo en {que}", what); }
     }
 }

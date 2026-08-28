@@ -11,7 +11,7 @@ using MySqlConnector;
 
 namespace MexOrbit.GameServer.Infrastructure;
 
-public abstract class MySqlRepositorio(string connectionString)
+public abstract class MySqlRepository(string connectionString)
 {
     protected MySqlConnection Open()
     {

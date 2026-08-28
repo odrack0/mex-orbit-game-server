@@ -11,7 +11,7 @@ using MexOrbit.GameServer.Domain;
 namespace MexOrbit.GameServer.Infrastructure;
 
 public sealed class EconomyRepository(string connectionString)
-    : MySqlRepositorio(connectionString), IEconomyRepository
+    : MySqlRepository(connectionString), IEconomyRepository
 {
     /// <summary>Recolección: suma a la bodega volante + ledger, en una transacción.
     /// Escritor exclusivo: el game server (frontera del esquema §4).</summary>
@@ -41,10 +41,10 @@ public sealed class EconomyRepository(string connectionString)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
-        var filas = db.Query<(long ItemId, uint Amount)>(
+        var rows = db.Query<(long ItemId, uint Amount)>(
             @"SELECT CAST(server_item_id AS SIGNED) AS ItemId, amount
               FROM player_cargo_hold WHERE account_id = @accountId", new { accountId }, tx).ToList();
-        foreach (var (itemId, amount) in filas)
+        foreach (var (itemId, amount) in rows)
             db.Execute(
                 @"INSERT INTO economy_ledger (account_id, server_item_id, delta, reason, ref_id)
                   VALUES (@accountId, @itemId, @delta, 'CARGO_LOST', @boxRef)",
@@ -86,23 +86,23 @@ public sealed class EconomyRepository(string connectionString)
 
     /// <summary>Descarga en base: bodega -> almacen y refinado automatico, TODO en
     /// una transaccion. Escrituras siempre relativas (esquema-v1 §4).</summary>
-    public UnloadOutcome UnloadAndRefine(long accountId, RefineRecipe? receta)
+    public UnloadOutcome UnloadAndRefine(long accountId, RefineRecipe? recipe)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
 
-        var bodega = db.Query<(long ItemId, uint Amount)>(
+        var hold = db.Query<(long ItemId, uint Amount)>(
             @"SELECT CAST(server_item_id AS SIGNED) AS ItemId, amount
               FROM player_cargo_hold WHERE account_id = @accountId AND amount > 0",
             new { accountId }, tx).ToDictionary(r => r.ItemId, r => r.Amount);
-        if (bodega.Count == 0)
+        if (hold.Count == 0)
         {
             tx.Commit();
             return new UnloadOutcome(new(), new());
         }
 
         // 1) la bodega entra al almacen
-        foreach (var (itemId, amount) in bodega)
+        foreach (var (itemId, amount) in hold)
         {
             db.Execute(
                 @"INSERT INTO player_resource_balance (account_id, server_item_id, amount)
@@ -117,50 +117,50 @@ public sealed class EconomyRepository(string connectionString)
         db.Execute("DELETE FROM player_cargo_hold WHERE account_id = @accountId", new { accountId }, tx);
 
         // 2) refinado automatico y gratis: cuantos lotes completos alcanzan
-        var refinado = new Dictionary<long, uint>();
-        if (receta is not null && receta.Ingredients.Count > 0)
+        var refined = new Dictionary<long, uint>();
+        if (recipe is not null && recipe.Ingredients.Count > 0)
         {
-            var saldos = db.Query<(long ItemId, decimal Amount)>(
+            var balances = db.Query<(long ItemId, decimal Amount)>(
                 @"SELECT CAST(server_item_id AS SIGNED) AS ItemId, amount
                   FROM player_resource_balance WHERE account_id = @accountId",
                 new { accountId }, tx).ToDictionary(r => r.ItemId, r => r.Amount);
 
-            var lotes = uint.MaxValue;
-            foreach (var (itemId, necesario) in receta.Ingredients)
+            var batches = uint.MaxValue;
+            foreach (var (itemId, needed) in recipe.Ingredients)
             {
-                var disponible = saldos.GetValueOrDefault(itemId, 0m);
-                lotes = Math.Min(lotes, (uint)Math.Floor(disponible / necesario));
+                var available = balances.GetValueOrDefault(itemId, 0m);
+                batches = Math.Min(batches, (uint)Math.Floor(available / needed));
             }
-            if (lotes is > 0 and < uint.MaxValue)
+            if (batches is > 0 and < uint.MaxValue)
             {
-                foreach (var (itemId, necesario) in receta.Ingredients)
+                foreach (var (itemId, needed) in recipe.Ingredients)
                 {
-                    var consumo = necesario * lotes;
+                    var consumed = needed * batches;
                     db.Execute(
-                        @"UPDATE player_resource_balance SET amount = amount - @consumo
+                        @"UPDATE player_resource_balance SET amount = amount - @consumed
                           WHERE account_id = @accountId AND server_item_id = @itemId",
-                        new { accountId, itemId, consumo }, tx);
+                        new { accountId, itemId, consumed }, tx);
                     db.Execute(
                         @"INSERT INTO economy_ledger (account_id, server_item_id, delta, reason)
-                          VALUES (@accountId, @itemId, -@consumo, 'REFINE_IN')",
-                        new { accountId, itemId, consumo }, tx);
+                          VALUES (@accountId, @itemId, -@consumed, 'REFINE_IN')",
+                        new { accountId, itemId, consumed }, tx);
                 }
-                var producido = receta.OutputAmount * lotes;
+                var produced = recipe.OutputAmount * batches;
                 db.Execute(
                     @"INSERT INTO player_resource_balance (account_id, server_item_id, amount)
-                      VALUES (@accountId, @itemId, @producido)
-                      ON DUPLICATE KEY UPDATE amount = amount + @producido",
-                    new { accountId, itemId = receta.OutputItemId, producido }, tx);
+                      VALUES (@accountId, @itemId, @produced)
+                      ON DUPLICATE KEY UPDATE amount = amount + @produced",
+                    new { accountId, itemId = recipe.OutputItemId, produced }, tx);
                 db.Execute(
                     @"INSERT INTO economy_ledger (account_id, server_item_id, delta, reason)
-                      VALUES (@accountId, @itemId, @producido, 'REFINE_OUT')",
-                    new { accountId, itemId = receta.OutputItemId, producido }, tx);
-                refinado[receta.OutputItemId] = producido;
+                      VALUES (@accountId, @itemId, @produced, 'REFINE_OUT')",
+                    new { accountId, itemId = recipe.OutputItemId, produced }, tx);
+                refined[recipe.OutputItemId] = produced;
             }
         }
 
         tx.Commit();
-        return new UnloadOutcome(bodega, refinado);
+        return new UnloadOutcome(hold, refined);
     }
 
     /// <summary>Venta al NPC: material del almacen -> credits, transaccional.
@@ -170,40 +170,40 @@ public sealed class EconomyRepository(string connectionString)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
-        var disponible = db.ExecuteScalar<decimal?>(
+        var available = db.ExecuteScalar<decimal?>(
             @"SELECT amount FROM player_resource_balance
               WHERE account_id = @accountId AND server_item_id = @itemId FOR UPDATE",
             new { accountId, itemId }, tx) ?? 0m;
-        var vender = amount == 0 ? (uint)Math.Floor(disponible) : Math.Min(amount, (uint)Math.Floor(disponible));
-        if (vender == 0)
+        var toSell = amount == 0 ? (uint)Math.Floor(available) : Math.Min(amount, (uint)Math.Floor(available));
+        if (toSell == 0)
         {
             tx.Commit();
             return (0, 0m, 0m);
         }
-        var ganado = price * vender;
+        var earned = price * toSell;
         db.Execute(
-            @"UPDATE player_resource_balance SET amount = amount - @vender
+            @"UPDATE player_resource_balance SET amount = amount - @toSell
               WHERE account_id = @accountId AND server_item_id = @itemId",
-            new { accountId, itemId, vender }, tx);
+            new { accountId, itemId, toSell }, tx);
         db.Execute(
             @"INSERT INTO player_resource_balance (account_id, server_item_id, amount)
-              SELECT @accountId, id, @ganado FROM server_item WHERE item_key = 'credits'
-              ON DUPLICATE KEY UPDATE amount = amount + @ganado",
-            new { accountId, ganado }, tx);
+              SELECT @accountId, id, @earned FROM server_item WHERE item_key = 'credits'
+              ON DUPLICATE KEY UPDATE amount = amount + @earned",
+            new { accountId, earned }, tx);
         db.Execute(
             @"INSERT INTO economy_ledger (account_id, server_item_id, delta, reason)
-              VALUES (@accountId, @itemId, -@vender, 'NPC_SALE')",
-            new { accountId, itemId, vender }, tx);
+              VALUES (@accountId, @itemId, -@toSell, 'NPC_SALE')",
+            new { accountId, itemId, toSell }, tx);
         db.Execute(
             @"INSERT INTO economy_ledger (account_id, server_item_id, delta, reason)
-              SELECT @accountId, id, @ganado, 'NPC_SALE' FROM server_item WHERE item_key = 'credits'",
-            new { accountId, ganado }, tx);
-        var nuevos = db.ExecuteScalar<decimal>(
+              SELECT @accountId, id, @earned, 'NPC_SALE' FROM server_item WHERE item_key = 'credits'",
+            new { accountId, earned }, tx);
+        var newBalance = db.ExecuteScalar<decimal>(
             @"SELECT amount FROM player_resource_balance
               WHERE account_id = @accountId
                 AND server_item_id = (SELECT id FROM server_item WHERE item_key = 'credits')",
             new { accountId }, tx);
         tx.Commit();
-        return (vender, ganado, nuevos);
+        return (toSell, earned, newBalance);
     }
 }

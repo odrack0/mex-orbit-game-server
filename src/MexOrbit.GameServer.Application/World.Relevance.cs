@@ -1,6 +1,6 @@
 // Relevancia por rango: el cliente solo sabe de lo que tiene cerca.
 //
-// Antes el mundo hacia `Broadcast` de todo a todos — los 54 bichos del 1-1, sus
+// Antes el mundo hacia `ToThoseWhoSee` de todo a todos — los 54 bichos del 1-1, sus
 // movimientos y cada caja, a cada jugador esté donde esté. Ahora cada jugador
 // tiene un conjunto de lo que SU cliente cree que existe, y cada tick se calcula
 // el diff: lo que entra se anuncia, lo que sale se retira.
@@ -25,114 +25,114 @@ namespace MexOrbit.GameServer.Application;
 public sealed partial class World
 {
     /// <summary>El diff de un tick, para cada jugador con socket vivo.</summary>
-    private void ActualizarRelevancia()
+    private void UpdateRelevance()
     {
-        foreach (var observador in _players.Values)
+        foreach (var observer in _players.Values)
         {
-            // sin socket no hay a quien contarle nada; al volver, `SincronizarMundo`
+            // sin socket no hay a quien contarle nada; al volver, `SyncWorld`
             // resiembra el conjunto entero
-            if (observador.Desconectado) continue;
-            RevisarEntidades(observador);
-            RevisarCajas(observador);
+            if (observer.Disconnected) continue;
+            ReviewEntities(observer);
+            ReviewBoxes(observer);
         }
     }
 
-    private void RevisarEntidades(PlayerSlot observador)
+    private void ReviewEntities(PlayerSlot observer)
     {
         // Lo que dejo de existir por su cuenta (murio, salto, cerro sesion) ya
         // recibio su propio aviso —EntityDestroyed o EntityDespawn— asi que aqui
         // solo se limpia el rastro, sin mandar nada. Importa porque los NPC
         // REUTILIZAN su id al reaparecer: un id fantasma en este conjunto haria
         // que el bicho volviera al mapa sin que su cliente se enterase.
-        observador.Vistas.RemoveWhere(id => !SigueEnElMundo(id));
+        observer.SeenEntities.RemoveWhere(id => !StillInWorld(id));
 
-        foreach (var npc in _npcs.Values) Revisar(observador, npc);
-        foreach (var otro in _players.Values)
+        foreach (var npc in _npcs.Values) Review(observer, npc);
+        foreach (var other in _players.Values)
         {
             // un destruido no se ve: ya se anuncio con EntityDestroyed y vuelve
             // a existir cuando elija reaparicion
-            if (otro == observador || otro.Muerto) continue;
-            Revisar(observador, otro.Entity);
+            if (other == observer || other.Dead) continue;
+            Review(observer, other.Entity);
         }
     }
 
-    private void Revisar(PlayerSlot observador, Entity objetivo)
+    private void Review(PlayerSlot observer, Entity target)
     {
-        var yaVisto = observador.Vistas.Contains(objetivo.Id);
+        var alreadySeen = observer.SeenEntities.Contains(target.Id);
         // El objetivo seleccionado NUNCA sale de relevancia (spec del protocolo).
         // Si no, perseguir a un bicho que huye seria verlo evaporarse justo
         // cuando importa, y el server seguiria diciendo que lo tienes fichado.
-        var visible = objetivo.Id == observador.TargetId
-            || Geometria.Distancia(observador.Entity, objetivo) <= rangos.UmbralEntidad(yaVisto);
+        var visible = target.Id == observer.TargetId
+            || Geometry.Distance(observer.Entity, target) <= ranges.EntityThreshold(alreadySeen);
 
-        if (visible == yaVisto) return;
+        if (visible == alreadySeen) return;
 
         if (visible)
         {
-            observador.Vistas.Add(objetivo.Id);
-            Enviar(observador, new EntitySpawned(objetivo));
+            observer.SeenEntities.Add(target.Id);
+            Send(observer, new EntitySpawned(target));
             // ...y su rumbo si venia volando. `EntitySpawn` no lleva destino, asi
             // que sin esto una nave que entra en rango en pleno vuelo aparece
             // congelada hasta su siguiente movimiento — que puede tardar
             // segundos, o no llegar nunca si ya iba camino de su destino.
-            if (objetivo.Moving) Enviar(observador, new EntityMoved(objetivo));
+            if (target.Moving) Send(observer, new EntityMoved(target));
         }
         else
         {
-            observador.Vistas.Remove(objetivo.Id);
-            Enviar(observador, new EntityDespawned(objetivo.Id, DespawnReason.Range));
+            observer.SeenEntities.Remove(target.Id);
+            Send(observer, new EntityDespawned(target.Id, DespawnReason.Range));
         }
     }
 
-    private void RevisarCajas(PlayerSlot observador)
+    private void ReviewBoxes(PlayerSlot observer)
     {
-        observador.CajasVistas.RemoveWhere(id => !_boxes.ContainsKey(id));
+        observer.SeenBoxes.RemoveWhere(id => !_boxes.ContainsKey(id));
 
-        foreach (var caja in _boxes.Values)
+        foreach (var box in _boxes.Values)
         {
-            var yaVista = observador.CajasVistas.Contains(caja.Id);
-            var visible = Geometria.Distancia(caja.X, caja.Y, observador.Entity.X, observador.Entity.Y)
-                <= rangos.UmbralObjeto(yaVista);
-            if (visible == yaVista) continue;
+            var alreadySeen = observer.SeenBoxes.Contains(box.Id);
+            var visible = Geometry.Distance(box.X, box.Y, observer.Entity.X, observer.Entity.Y)
+                <= ranges.ObjectThreshold(alreadySeen);
+            if (visible == alreadySeen) continue;
 
             if (visible)
             {
-                observador.CajasVistas.Add(caja.Id);
-                Enviar(observador, new BoxSpawned(caja.Id, "from_ship", caja.X, caja.Y));
+                observer.SeenBoxes.Add(box.Id);
+                Send(observer, new BoxSpawned(box.Id, "from_ship", box.X, box.Y));
             }
             else
             {
-                observador.CajasVistas.Remove(caja.Id);
-                Enviar(observador, new BoxDespawned(caja.Id, BoxDespawnReason.Range));
+                observer.SeenBoxes.Remove(box.Id);
+                Send(observer, new BoxDespawned(box.Id, BoxDespawnReason.Range));
             }
         }
     }
 
     /// <summary>Siembra el conjunto de un jugador que acaba de entrar o volver:
     /// recibe spawns de lo que este en rango AHORA, no del mapa entero.</summary>
-    private void SembrarRelevancia(PlayerSlot observador)
+    private void SeedRelevance(PlayerSlot observer)
     {
-        observador.Vistas.Clear();
-        observador.CajasVistas.Clear();
-        RevisarEntidades(observador);
-        RevisarCajas(observador);
+        observer.SeenEntities.Clear();
+        observer.SeenBoxes.Clear();
+        ReviewEntities(observer);
+        ReviewBoxes(observer);
     }
 
-    private bool SigueEnElMundo(ulong entityId) =>
+    private bool StillInWorld(ulong entityId) =>
         _npcs.ContainsKey(entityId)
-        || _players.Values.Any(s => s.Entity.Id == entityId && !s.Muerto);
+        || _players.Values.Any(s => s.Entity.Id == entityId && !s.Dead);
 
     /// <summary>Saca una entidad del conjunto de TODOS. Se llama cuando deja de
     /// existir de verdad: su aviso (EntityDestroyed / EntityDespawn) ya salio, y
     /// el cliente ya borro el nodo.</summary>
-    private void OlvidarEntidad(ulong entityId)
+    private void ForgetEntity(ulong entityId)
     {
-        foreach (var slot in _players.Values) slot.Vistas.Remove(entityId);
+        foreach (var slot in _players.Values) slot.SeenEntities.Remove(entityId);
     }
 
-    private void OlvidarCaja(ulong boxId)
+    private void ForgetBox(ulong boxId)
     {
-        foreach (var slot in _players.Values) slot.CajasVistas.Remove(boxId);
+        foreach (var slot in _players.Values) slot.SeenBoxes.Remove(boxId);
     }
 
     // ─── difusion por relevancia ────────────────────────────────────────────
@@ -141,13 +141,13 @@ public sealed partial class World
     ///
     /// El frame se codifica de forma perezosa: si no la ve nadie, el evento no
     /// llega siquiera a serializarse.</summary>
-    private void AQuienesVen(ulong entityId, ServerEvent evento)
+    private void ToThoseWhoSee(ulong entityId, ServerEvent serverEvent)
     {
         byte[]? frame = null;
         foreach (var slot in _players.Values)
         {
-            if (slot.Entity.Id != entityId && !slot.Vistas.Contains(entityId)) continue;
-            frame ??= codec.Encode(evento);
+            if (slot.Entity.Id != entityId && !slot.SeenEntities.Contains(entityId)) continue;
+            frame ??= codec.Encode(serverEvent);
             slot.Port.Send(frame);
         }
     }
@@ -155,26 +155,26 @@ public sealed partial class World
     /// <summary>Un suceso entre dos —un disparo— lo recibe quien vea a cualquiera
     /// de los dos: si ves al que dispara pero no a su blanco, el laser tiene que
     /// salir igual.</summary>
-    private void AQuienesVen(ulong unaId, ulong otraId, ServerEvent evento)
+    private void ToThoseWhoSee(ulong oneId, ulong otherId, ServerEvent serverEvent)
     {
         byte[]? frame = null;
         foreach (var slot in _players.Values)
         {
-            var laVe = slot.Entity.Id == unaId || slot.Vistas.Contains(unaId)
-                    || slot.Entity.Id == otraId || slot.Vistas.Contains(otraId);
+            var laVe = slot.Entity.Id == oneId || slot.SeenEntities.Contains(oneId)
+                    || slot.Entity.Id == otherId || slot.SeenEntities.Contains(otherId);
             if (!laVe) continue;
-            frame ??= codec.Encode(evento);
+            frame ??= codec.Encode(serverEvent);
             slot.Port.Send(frame);
         }
     }
 
-    private void AQuienesVenCaja(ulong boxId, ServerEvent evento)
+    private void ToThoseWhoSeeBox(ulong boxId, ServerEvent serverEvent)
     {
         byte[]? frame = null;
         foreach (var slot in _players.Values)
         {
-            if (!slot.CajasVistas.Contains(boxId)) continue;
-            frame ??= codec.Encode(evento);
+            if (!slot.SeenBoxes.Contains(boxId)) continue;
+            frame ??= codec.Encode(serverEvent);
             slot.Port.Send(frame);
         }
     }

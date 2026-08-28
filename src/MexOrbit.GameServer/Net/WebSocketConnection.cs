@@ -30,53 +30,53 @@ public sealed class WebSocketConnection(WebSocket socket, Handshake handshake, I
 
     public async Task RunAsync()
     {
-        var envio = Task.Run(SendLoopAsync);
+        var sending = Task.Run(SendLoopAsync);
         try
         {
             // ---- handshake: el primer frame es Hello (entrar) o Resume (volver) ----
-            var primero = await ReceiveFrameAsync();
-            if (primero is null) return;
+            var first = await ReceiveFrameAsync();
+            if (first is null) return;
 
-            var enlace = Presentarse(primero);
-            if (enlace is null) return;
-            _world = enlace.Mundo;
-            AccountId = enlace.AccountId;
+            var link = DoHandshake(first);
+            if (link is null) return;
+            _world = link.TestWorld;
+            AccountId = link.AccountId;
 
             await LoopAsync();
         }
-        catch (OperationCanceledException) { /* cierre pedido por el mundo */ }
-        catch (WebSocketException) { /* socket caido: el mundo hara el drop */ }
+        catch (OperationCanceledException) { /* cierre pedido por el world */ }
+        catch (WebSocketException) { /* socket caido: el world hara el drop */ }
         finally
         {
             // DROPPED (no LOGOUT): una caida abre la ventana de gracia; solo el
             // LogoutRequest explicito saca la nave del mundo
             _world?.Post(new LeaveCmd(this, "DROPPED"));
             _outbox.Writer.TryComplete();
-            try { await envio; } catch { /* ya cerrando */ }
+            try { await sending; } catch { /* ya cerrando */ }
             socket.Dispose();
         }
     }
 
-    private Enlace? Presentarse(byte[] primero)
+    private HandshakeResult? DoHandshake(byte[] first)
     {
         try
         {
-            if (ClientFrames.EsResume(primero))
+            if (ClientFrames.IsResume(first))
             {
-                var (version, token) = ClientFrames.LeerResume(primero);
-                return handshake.Volver(this, token, version);
+                var (version, token) = ClientFrames.ReadResume(first);
+                return handshake.Resume(this, token, version);
             }
-            if (ClientFrames.EsHello(primero))
+            if (ClientFrames.IsHello(first))
             {
-                var (version, ticket) = ClientFrames.LeerHello(primero);
-                return handshake.Entrar(this, ticket, version);
+                var (version, ticket) = ClientFrames.ReadHello(first);
+                return handshake.Enter(this, ticket, version);
             }
-            Enviar(new Failed(0, Domain.ErrorCode.Invalid, "se esperaba Hello o Resume"));
+            Send(new Failed(0, Domain.ErrorCode.Invalid, "se esperaba Hello o Resume"));
             return null;
         }
         catch (ProtocolViolationException e)
         {
-            Enviar(new Failed(0, Domain.ErrorCode.Invalid, e.Message));
+            Send(new Failed(0, Domain.ErrorCode.Invalid, e.Message));
             return null;
         }
     }
@@ -95,22 +95,22 @@ public sealed class WebSocketConnection(WebSocket socket, Handshake handshake, I
     {
         try
         {
-            var cmd = ClientFrames.Leer(this, frame);
+            var cmd = ClientFrames.Read(this, frame);
             // mensaje desconocido o fuera de lugar: se ignora (jamas rompe la sesion)
             if (cmd is null) return;
             _world?.Post(cmd);
             // el logout ademas cuelga: el mundo no cierra sockets ajenos
-            if (ClientFrames.EsLogout(frame)) _cts.Cancel();
+            if (ClientFrames.IsLogout(frame)) _cts.Cancel();
         }
         catch (ProtocolViolationException e)
         {
             // violacion del contrato = mensaje descartado con aviso; el rate limiting
             // por tipo declarado en el esquema llega con el generador de limiters (I5)
-            Enviar(new Failed(0, Domain.ErrorCode.Invalid, e.Message));
+            Send(new Failed(0, Domain.ErrorCode.Invalid, e.Message));
         }
     }
 
-    private void Enviar(ServerEvent evento) => Send(codec.Encode(evento));
+    private void Send(ServerEvent serverEvent) => Send(codec.Encode(serverEvent));
 
     private async Task<byte[]?> ReceiveFrameAsync()
     {
