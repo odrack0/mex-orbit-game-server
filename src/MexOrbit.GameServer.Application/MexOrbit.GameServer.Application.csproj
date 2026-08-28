@@ -1,0 +1,17 @@
+<!-- Los casos de uso y el bucle de simulacion. Declara los PUERTOS (que necesita
+     del mundo exterior) y no conoce a ninguno de sus adaptadores. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MexOrbit.GameServer.Application</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- lo unico de fuera: la abstraccion de log, que no ata a ninguna implementacion -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MexOrbit.GameServer.Domain\MexOrbit.GameServer.Domain.csproj" />
+  </ItemGroup>
+</Project>

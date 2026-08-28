@@ -1,7 +1,7 @@
 // Caracterizacion de la sesion: entrada unica, la ventana de gracia que hace que
 // una caida de socket no cueste la nave, el regreso y el heartbeat.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Tests;

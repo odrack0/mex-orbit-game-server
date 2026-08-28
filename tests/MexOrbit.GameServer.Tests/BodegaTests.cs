@@ -1,7 +1,7 @@
 // Caracterizacion de la bodega volante y la base: recoger cajas, la frontera del
 // rango de la estacion, descargar y vender.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Tests;

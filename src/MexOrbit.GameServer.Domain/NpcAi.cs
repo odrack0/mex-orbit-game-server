@@ -21,7 +21,7 @@
 //   · Su bucle recorria TODOS los jugadores en rango sin cortar, asi que
 //     mandaba el ultimo de la lista. Aqui gana el mas cercano.
 //   · DateTime.Now por todos lados; aqui el tiempo es el tick inyectado.
-namespace MexOrbit.GameServer.Game;
+namespace MexOrbit.GameServer.Domain;
 
 public enum NpcAiState
 {

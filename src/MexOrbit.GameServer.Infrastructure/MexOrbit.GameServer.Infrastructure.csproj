@@ -1,0 +1,18 @@
+<!-- Los adaptadores de salida: MySQL y la verificacion del ticket. Aqui viven las
+     dependencias sucias, y por eso estan LEJOS del centro. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MexOrbit.GameServer.Infrastructure</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.4.0" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MexOrbit.GameServer.Application\MexOrbit.GameServer.Application.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,9 +1,16 @@
-// mex-orbit-game-server — el servidor de simulacion, minimo del vertical slice (E2/I3).
-// Mapas bajo demanda con un solo tick de 80 ms, handshake con ticket Ed25519 de la api, sesion unica.
-// Transporte dev: ws:// en 5200 (TLS lo aporta la infraestructura en prod: wss://).
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+// mex-orbit-game-server — el host: configuracion, cableado y el endpoint del socket.
+//
+// Este archivo es la RAIZ DE COMPOSICION y es el unico sitio del server donde se
+// nombra a la vez un adaptador concreto (MySQL, Ed25519, el codec del protocolo) y
+// lo que lo usa. Todo lo de dentro conoce interfaces; aqui se decide cuales.
+//
+// Mapas bajo demanda con un solo tick de 80 ms, handshake con ticket Ed25519 de la
+// api, sesion unica. Transporte dev: ws:// en 5200 (TLS lo aporta la
+// infraestructura en prod: wss://).
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Infrastructure;
 using MexOrbit.GameServer.Net;
+using MexOrbit.GameServer.Protocol;
 
 var builder = WebApplication.CreateBuilder(args);
 var conn = builder.Configuration.GetConnectionString("Default")
@@ -16,18 +23,31 @@ var pubKeyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     builder.Configuration.GetValue("Game:ApiPublicKeyPath", "keys/ed25519.pub")!));
 
 var app = builder.Build();
-var log = app.Services.GetRequiredService<ILoggerFactory>();
+var logs = app.Services.GetRequiredService<ILoggerFactory>();
 
-var repo = new Repo(conn);
+// ─── los adaptadores concretos ──────────────────────────────────────────────
+var mapas = new MapCatalog(conn);
+var catalogo = new GameCatalog(conn);
+var ajustes = new ServerSettings(conn);
+var jugadores = new PlayerRepository(conn);
+var sesiones = new SessionRepository(conn);
+var economia = new EconomyRepository(conn);
+var codec = new ServerCodec();
+var reloj = new SystemClock();
+var verificador = new Ed25519TicketVerifier(pubKeyPath);
+
 // dial de JUEGO, no de despliegue: vive en server_setting con su auditoria
-var npcCombat = repo.LoadBoolSetting("npc_combat_enabled", true);
-// Los mapas se levantan cuando alguien entra, no al arrancar: 29 mapas serian 29
-// consultas y 29 poblaciones de NPC antes de que exista un solo jugador.
-var universo = new Universe(repo, repo, repo, repo, repo, log, tickMs, pingInterval, pingMisses, npcCombat);
-var world = universo.Inicial();
-var mapa = world.Mapa;
+var npcCombat = ajustes.LoadBoolSetting("npc_combat_enabled", true);
 
-var verifier = new TicketVerifier(pubKeyPath);
+// ─── la simulacion ──────────────────────────────────────────────────────────
+// Los mapas se levantan cuando alguien entra, no al arrancar: 29 mapas serian
+// 29 consultas y 29 poblaciones de NPC antes de que exista un solo jugador.
+var universo = new Universe(mapas, catalogo, jugadores, sesiones, economia, codec, reloj, logs,
+    tickMs, pingInterval, pingMisses, npcCombat);
+var mapa = universo.Inicial().Mapa;
+var handshake = new Handshake(universo, jugadores, sesiones, verificador, codec, reloj,
+    protocolVersion, tickMs);
+
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 _ = Task.Run(() => universo.RunAsync(lifetime.ApplicationStopping));
 
@@ -40,9 +60,7 @@ app.Map("/ws", async context =>
         return;
     }
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
-    var conexion = new ClientConnection(socket, universo, repo, repo, verifier, protocolVersion,
-        log.CreateLogger<ClientConnection>());
-    await conexion.RunAsync();
+    await new WebSocketConnection(socket, handshake, codec).RunAsync();
 });
 app.MapGet("/health", () => Results.Ok(new { status = "ok", map = mapa.Code }));
 

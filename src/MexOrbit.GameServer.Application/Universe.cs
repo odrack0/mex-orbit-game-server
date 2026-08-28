@@ -11,14 +11,15 @@
 // Aqui los mapas se crean **cuando alguien entra** y se tickean desde UN solo
 // bucle, saltandose los vacios. Un mapa sin jugadores no necesita simularse: sus
 // NPC no vagabundean para nadie.
-using MexOrbit.GameServer.Data;
+using MexOrbit.GameServer.Domain;
+using Microsoft.Extensions.Logging;
 
-namespace MexOrbit.GameServer.Game;
+namespace MexOrbit.GameServer.Application;
 
 public sealed class Universe(IMapCatalog maps, IGameCatalog catalogo,
     IPlayerRepository jugadores, ISessionRepository sesiones, IEconomyRepository economia,
-    ILoggerFactory logs, int tickMs,
-    int pingIntervalSeconds, int pingMissesToDrop, bool npcCombatEnabled)
+    IServerCodec codec, IClock clock, ILoggerFactory logs,
+    int tickMs, int pingIntervalSeconds, int pingMissesToDrop, bool npcCombatEnabled)
 {
     private readonly Dictionary<string, World> _mundos = new();
     private readonly ILogger _log = logs.CreateLogger<Universe>();
@@ -43,10 +44,11 @@ public sealed class Universe(IMapCatalog maps, IGameCatalog catalogo,
             _log.LogWarning("alguien pidio el mapa {code} y no existe en BD", code);
             return null;
         }
-        var mundo = new World(mapa, catalogo.LoadNpcSpawns(mapa.Id), catalogo.LoadZoneBias(mapa.ZoneTier),
-            catalogo.LoadRefineRecipe(), catalogo.LoadNpcPrices(), maps.LoadPortals(mapa.Id),
-            jugadores, sesiones, economia, logs.CreateLogger<World>(), tickMs, pingIntervalSeconds, pingMissesToDrop,
-            npcCombatEnabled);
+        var mundo = new World(mapa, catalogo.LoadNpcSpawns(mapa.Id),
+            catalogo.LoadZoneBias(mapa.ZoneTier), catalogo.LoadRefineRecipe(),
+            catalogo.LoadNpcPrices(), maps.LoadPortals(mapa.Id),
+            jugadores, sesiones, economia, codec, clock, logs.CreateLogger<World>(),
+            tickMs, pingIntervalSeconds, pingMissesToDrop, npcCombatEnabled);
         mundo.SpawnNpcs();
         mundo.Saltar += Saltar;
         _mundos[code] = mundo;

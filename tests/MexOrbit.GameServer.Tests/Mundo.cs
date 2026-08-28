@@ -6,9 +6,9 @@
 // expulsado por no contestar unos Pong que la prueba no esta ejercitando. Quien
 // caracteriza el heartbeat lo enciende con `ConPing`, y ahi si son los diales
 // de verdad.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
-using MexOrbit.Protocol;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
+using MexOrbit.GameServer.Protocol;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MexOrbit.GameServer.Tests;
@@ -75,8 +75,11 @@ public sealed class Mundo
 
     public Mundo Construir()
     {
+        // El codec es el DE VERDAD: las pruebas afirman sobre los mismos bytes que
+        // recibiria el cliente de Godot, no sobre un doble complaciente.
         _world = new World(Mapa, _spawns, _bias, _receta, _precios, _portales,
-            Bd, Bd, Bd, NullLogger<World>.Instance, TickMs, _pingSegundos, _pingFallos, _combateNpc);
+            Bd, Bd, Bd, new ServerCodec(), new RelojFijo(), NullLogger<World>.Instance,
+            TickMs, _pingSegundos, _pingFallos, _combateNpc);
         _world.SpawnNpcs();
         return this;
     }
@@ -138,11 +141,8 @@ public sealed class Mundo
         var (desdeX, desdeY, velocidad) = _naves[puerto.AccountId];
         var destinoX = Math.Clamp(x, 0, Mapa.BoundsX);
         var destinoY = Math.Clamp(y, 0, Mapa.BoundsY);
-        W.Post(new MoveIntentCmd(puerto, new MoveIntent
-        {
-            Seq = SiguienteSeq(puerto.AccountId),
-            TargetX = (ulong)Math.Round(destinoX), TargetY = (ulong)Math.Round(destinoY),
-        }));
+        W.Post(new MoveIntentCmd(puerto, SiguienteSeq(puerto.AccountId),
+            (uint)Math.Round(destinoX), (uint)Math.Round(destinoY)));
         var dist = Math.Sqrt(Math.Pow(destinoX - desdeX, 2) + Math.Pow(destinoY - desdeY, 2));
         var paso = velocidad * Dt;
         Tick((int)Math.Ceiling(dist / paso) + 1);
@@ -177,4 +177,11 @@ public static class Espera
         }
         throw new TimeoutException($"nunca ocurrio: {que}");
     }
+}
+
+/// <summary>El reloj de pared, clavado. Lo unico que lo usa es la marca de
+/// tiempo del chat, y una prueba no puede depender de que hora es.</summary>
+public sealed class RelojFijo : IClock
+{
+    public long UnixMs => 1_756_000_000_000;
 }

@@ -1,8 +1,8 @@
 // Caracterizacion de los NPC: la maquina de tres estados portada del legado, la
 // huida de los cobardes, la regeneracion de escudo, el DMZ de la estacion y lo
 // que pasa cuando uno cae.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Tests;

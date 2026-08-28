@@ -5,8 +5,8 @@
 //
 // Es deliberado que sobrevivan al refactor: cuando el World se parta en capas,
 // aqui solo cambia el cableado del constructor; las afirmaciones siguen valiendo.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.Protocol;
 using Microsoft.Extensions.Logging.Abstractions;
 

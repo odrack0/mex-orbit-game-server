@@ -11,6 +11,11 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\MexOrbit.GameServer\MexOrbit.GameServer.csproj" />
+    <!-- Se prueba la SIMULACION, no el host: ni ASP.NET ni MySQL entran aqui.
+         El codec si, porque las afirmaciones se hacen sobre los frames que
+         recibiria el cliente de verdad. -->
+    <ProjectReference Include="..\..\src\MexOrbit.GameServer.Domain\MexOrbit.GameServer.Domain.csproj" />
+    <ProjectReference Include="..\..\src\MexOrbit.GameServer.Application\MexOrbit.GameServer.Application.csproj" />
+    <ProjectReference Include="..\..\src\MexOrbit.GameServer.Protocol\MexOrbit.GameServer.Protocol.csproj" />
   </ItemGroup>
 </Project>

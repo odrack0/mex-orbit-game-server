@@ -18,8 +18,9 @@ El servidor de simulación en tiempo real del juego: el dueño del mundo, del co
 
 ## Stack
 
-- .NET (versión por confirmar al arrancar el pilar).
-- Base de datos: esquema nuevo, migraciones versionadas como disciplina (motor por confirmar: MySQL vs PostgreSQL).
+- .NET 10, C# con `Nullable` y `ImplicitUsings` activos.
+- Base de datos: MySQL con Dapper, esquema nuevo y migraciones versionadas como disciplina.
+- Transporte: WebSocket binario (`ws://` en dev; el TLS lo aporta la infraestructura en prod).
 
 ## Relación con otros repos
 
@@ -35,7 +36,76 @@ Los **Guidelines generales del juego** (`mex-orbit-docs`): toda mecánica implem
 
 ## Estado
 
-Repo recién creado. Primer paso: el documento de diseño del protocolo y de la arquitectura del server, antes de la primera línea de código.
+Vertical slice E2/I7 jugable: mapas bajo demanda, combate, NPCs con IA portada del legado,
+bodega y cajas, base con descarga y venta, reconexión con ventana de gracia, chat y salto de
+sector. Repartido en cinco proyectos (ver **Arquitectura**) con 70 pruebas de caracterización.
+
+## Arquitectura
+
+**Cebolla de cinco proyectos.** La direccion de las dependencias la impone el compilador, no
+la disciplina: `MexOrbit.GameServer.Domain` no tiene **ni una sola** referencia —ni a MySQL,
+ni al protocolo, ni al logging— y cada capa de fuera solo puede apuntar hacia dentro.
+
+```
+                     ┌──────────────────────────────┐
+                     │  MexOrbit.GameServer  (host) │  raiz de composicion
+                     └───────┬──────────────┬───────┘
+                             │              │
+           ┌─────────────────▼───┐   ┌──────▼──────────────┐
+           │   Infrastructure    │   │      Protocol       │   adaptadores
+           │  MySQL · Ed25519    │   │  codec del cable    │
+           └─────────────────┬───┘   └──────┬──────────────┘
+                             │              │
+                     ┌───────▼──────────────▼───────┐
+                     │        Application           │   casos de uso + puertos
+                     │  World · Universe · Handshake│
+                     └───────────────┬──────────────┘
+                                     │
+                     ┌───────────────▼──────────────┐
+                     │           Domain             │   reglas del juego
+                     │  Entity · NpcAi · Diales     │   (cero dependencias)
+                     └──────────────────────────────┘
+```
+
+| Proyecto | Que vive ahi | Que NO puede saber |
+|---|---|---|
+| `Domain` | `Entity`, `NpcAi`, `Diales`, `Reglas` (combate, botin, geometria), los modelos del juego | Que existe una BD, un socket o un protocolo binario |
+| `Application` | `World` (el tick), `Universe` (los mapas), `Handshake`, los **puertos** y los **eventos** | Que la BD es MySQL o que el cable es protobuf-like |
+| `Infrastructure` | Los seis repositorios Dapper/MySQL, el verificador Ed25519, el reloj | Nada del juego que no venga por un puerto |
+| `Protocol` | El `ServerCodec` y el lector de frames. El **unico** que compila `Messages.g.cs` | Las reglas del juego |
+| `MexOrbit.GameServer` | `Program.cs` y el WebSocket. Solo transporte y cableado | — |
+
+**Los puertos.** La simulacion pide lo que necesita en su propio idioma: `IMapCatalog`,
+`IGameCatalog`, `IServerSettings`, `IPlayerRepository`, `ISessionRepository`,
+`IEconomyRepository`, `IClientPort`, `IServerCodec`, `ITicketVerifier`, `IClock`. Estan
+partidos por **motivo**, no por tabla: quien lee catalogos al levantar un mapa no tiene nada
+que ver con quien mueve credits dentro de una transaccion.
+
+**El protocolo, fuera del juego.** El mundo emite **eventos** (`AttackLanded`, `BoxSpawned`,
+`RespawnOffered`...) y el `ServerCodec` los pone en el cable. Antes las reglas de combate
+llamaban a `.Encode()` a media funcion. El broadcast sigue costando **una** serializacion:
+el codec devuelve el frame y el mismo array viaja a todos.
+
+**La cebolla la comprueba el build.** `ArquitecturaTests` lee las referencias reales de los
+ensamblados compilados y falla si el dominio acaba dependiendo de MySQL o del protocolo, o si
+la aplicacion conoce a alguien que no sea el dominio. Un diagrama no impide nada; una prueba
+roja si.
+
+## Pruebas
+
+```bash
+dotnet test MexOrbit.GameServer.slnx
+```
+
+**70 pruebas, ~80 ms, sin MySQL y sin socket.** Son de *caracterizacion*: se escribieron
+contra el codigo ANTES de repartirlo en capas, para que el refactor no pudiera cambiar el
+juego sin que nadie se enterara. Fijan el escudo antes que el casco, la cadencia de 500 ms,
+la maquina de tres estados de la IA, la huida del Vorax, el DMZ de la estacion, la recogida
+parcial, la ventana de gracia, el heartbeat, el salto y el chat.
+
+El banco (`tests/.../Mundo.cs`) arma un `World` de verdad con la BD y el socket sustituidos
+por dobles, y **el codec autentico**: lo que las pruebas afirman son los mismos bytes que
+recibiria el cliente de Godot.
 
 ## Diales
 
@@ -45,26 +115,28 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 |---|---|---|---|
 | `TickMs` | `appsettings.json` | 80 ms | Tick fijo de simulacion (12.5 Hz, herencia del prototipo) |
 | `PingIntervalSeconds` y `PingMissesToDrop` | `appsettings.json` | 10 s, 3 fallos | Heartbeat: 3 pings sin Pong = socket muerto |
-| `LaserRange` | `Game-World.cs` | 600 | Alcance del laser; fuera de rango el laser espera, no se apaga |
-| `AttackIntervalMs` | `Game-World.cs` | 500 ms | Cadencia de golpe (con ION-1 de 60: 120 dps, TTK del Vex ~10 s) |
-| `CollectRange` | `Game-World.cs` | 250 | Distancia maxima para recolectar una caja |
-| `BoxTtlMs` | `Game-World.cs` | 150 s | Vida de la caja (2-3 min, guidelines seccion 7) |
-| Write-behind | `Game-World.cs (Tick)` | 30 s | Cadencia maxima de persistencia de player_ship_state |
-| Deambular de NPCs | `Game-NpcAi.cs` | destino en todo el mapa | Sustituido por la IA portada del legado (ver abajo): ya no es un tembleque de radio 800 |
+| `LaserRange` | `Domain/Diales.cs` | 600 | Alcance del laser; fuera de rango el laser espera, no se apaga |
+| `AttackIntervalMs` | `Domain/Diales.cs` | 500 ms | Cadencia de golpe (con ION-1 de 60: 120 dps, TTK del Vex ~10 s) |
+| `CollectRange` | `Domain/Diales.cs` | 250 | Distancia maxima para recolectar una caja |
+| `BoxTtlMs` | `Domain/Diales.cs` | 150 s | Vida de la caja (2-3 min, guidelines seccion 7) |
+| Write-behind | `Domain/Diales.cs` | 30 s | Cadencia maxima de persistencia de player_ship_state |
+| Deambular de NPCs | `Domain/NpcAi.cs` | destino en todo el mapa | Sustituido por la IA portada del legado (ver abajo): ya no es un tembleque de radio 800 |
 | Rango de la estacion | BD `map_station.secure_range` | 1500 | Dentro de este radio se puede descargar y vender (dato, no constante) |
-| `GraceMs` | `Game-World.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
-| `ChatMaxLen` | `Game-World.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
-| `AiThinkMs` | `Game-World.cs` | 1 s | Cada cuanto PIENSA un NPC (el legado tambien pensaba 1 vez por segundo) |
-| `NpcAttackIntervalMs` | `Game-World.cs` | 1 s | Cadencia de disparo del NPC |
-| `NpcAttackRange` | `Game-World.cs` | 600 | Alcance de su laser (igual que el del jugador) |
-| `AproximacionRadio` | `Game-World.cs` | 300 | A que distancia se planta junto a su presa (`ALIEN_DISTANCE_TO_USER` del legado) |
-| `DesaggroFactor` | `Game-World.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
-| `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Game-World.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
+| `GraceMs` | `Domain/Diales.cs` | 60 s | Ventana de reconexion tras caida de socket (auth-v1) |
+| `ChatMaxLen` | `Domain/Diales.cs` | 256 | Tope de un mensaje de chat (el mismo `max_len` del esquema) |
+| `AiThinkMs` | `Domain/Diales.cs` | 1 s | Cada cuanto PIENSA un NPC (el legado tambien pensaba 1 vez por segundo) |
+| `NpcAttackIntervalMs` | `Domain/Diales.cs` | 1 s | Cadencia de disparo del NPC |
+| `NpcAttackRange` | `Domain/Diales.cs` | 600 | Alcance de su laser (igual que el del jugador) |
+| `AproximacionRadio` | `Domain/Diales.cs` | 300 | A que distancia se planta junto a su presa (`ALIEN_DISTANCE_TO_USER` del legado) |
+| `DesaggroFactor` | `Domain/Diales.cs` | 1.8 | Se rinde a este multiplo de su radio de aggro |
+| `NpcShieldRegenMs` / `NpcOutOfCombatMs` | `Domain/Diales.cs` | 1 s / 10 s | 10% de escudo por segundo tras 10 s sin recibir fuego |
 | Aggro y agresividad | BD `npc_catalog.aggro_radius` / `is_aggressive` | 500-700 · solo el Ferox | Datos, no constantes: el radio y si caza son del catalogo |
 | Daño del NPC | BD `npc_catalog.damage` | 25-85 | Calibrado en la migracion `.7` por cuanto te cuesta matarlo |
 | Huida | BD `npc_catalog.flee_hp_pct` | 30 solo en el Vorax | Debajo de ese % de casco, el bicho se larga |
 | Combate NPC->jugador | BD `server_setting.npc_combat_enabled` | **0 (apagado)** | Apagado, los NPC persiguen pero no disparan |
-| `HuidaMs` / `HuidaDistancia` | `Game-World.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
+| `HuidaMs` / `HuidaDistancia` | `Domain/Diales.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
+| `JumpRange` | `Domain/Diales.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
+| `MargenDelMapa` | `Domain/Diales.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |
 
 ## La IA de los NPCs
 

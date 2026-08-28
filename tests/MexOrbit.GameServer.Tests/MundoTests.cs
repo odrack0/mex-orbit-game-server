@@ -1,7 +1,7 @@
 // Caracterizacion del resto del mundo: movimiento autoritativo, salto de sector,
 // chat, muerte del jugador y la promesa de que ningun fallo tumba el loop.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Tests;
@@ -17,7 +17,7 @@ public class MovimientoTests
         var p = m.Entrar(1);
         p.Limpiar();
 
-        m.W.Post(new MoveIntentCmd(p, new MoveIntent { Seq = 1, TargetX = 999_999, TargetY = 999_999 }));
+        m.W.Post(new MoveIntentCmd(p, 1, 999_999, 999_999));
         m.Tick();
 
         // el Moving eterno del legado, imposible: el clamp es del servidor
@@ -33,8 +33,8 @@ public class MovimientoTests
         var p = m.Entrar(1);
         p.Limpiar();
 
-        m.W.Post(new MoveIntentCmd(p, new MoveIntent { Seq = 5, TargetX = 11_000, TargetY = 6_000 }));
-        m.W.Post(new MoveIntentCmd(p, new MoveIntent { Seq = 3, TargetX = 9_000, TargetY = 6_000 }));
+        m.W.Post(new MoveIntentCmd(p, 5, 11_000, 6_000));
+        m.W.Post(new MoveIntentCmd(p, 3, 9_000, 6_000));
         m.Tick();
 
         var ecos = p.Todos<EntityMove>().Where(e => e.EntityId == 1).ToList();
@@ -51,7 +51,7 @@ public class MovimientoTests
         heroe.Limpiar();
         otro.Limpiar();
 
-        m.W.Post(new MoveIntentCmd(heroe, new MoveIntent { Seq = 1, TargetX = 11_000, TargetY = 6_000 }));
+        m.W.Post(new MoveIntentCmd(heroe, 1, 11_000, 6_000));
         m.Tick();
 
         Assert.Contains(heroe.Todos<EntityMove>(), e => e.EntityId == 1);
@@ -259,7 +259,7 @@ public class MuerteDelJugadorTests
         m.Segundos(5);
         p.Limpiar();
 
-        m.W.Post(new MoveIntentCmd(p, new MoveIntent { Seq = 99, TargetX = 5_000, TargetY = 5_000 }));
+        m.W.Post(new MoveIntentCmd(p, 99, 5_000, 5_000));
         m.Tick();
 
         Assert.Empty(p.Todos<EntityMove>().Where(e => e.EntityId == 1));
@@ -298,7 +298,7 @@ public class ResistenciaTests
         p.Limpiar();
 
         // el mundo sigue atendiendo comandos despues del desastre
-        m.W.Post(new MoveIntentCmd(p, new MoveIntent { Seq = 1, TargetX = 11_000, TargetY = 6_000 }));
+        m.W.Post(new MoveIntentCmd(p, 1, 11_000, 6_000));
         m.Tick();
 
         Assert.Contains(p.Todos<EntityMove>(), e => e.EntityId == 1);

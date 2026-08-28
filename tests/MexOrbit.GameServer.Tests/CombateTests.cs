@@ -1,7 +1,7 @@
 // Caracterizacion del combate jugador -> NPC. Fija lo que HOY hace el juego,
 // para que el refactor por capas no lo cambie sin que nadie se entere.
-using MexOrbit.GameServer.Data;
-using MexOrbit.GameServer.Game;
+using MexOrbit.GameServer.Application;
+using MexOrbit.GameServer.Domain;
 using MexOrbit.Protocol;
 
 namespace MexOrbit.GameServer.Tests;

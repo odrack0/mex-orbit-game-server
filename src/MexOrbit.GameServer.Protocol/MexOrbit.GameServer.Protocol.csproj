@@ -1,0 +1,18 @@
+<!-- El adaptador del cable: traduce los eventos de la aplicacion a frames y los
+     frames del cliente a comandos. Es el UNICO proyecto que compila el contrato
+     generado, y por eso cambiar el wire ya no toca las reglas del juego. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MexOrbit.GameServer.Protocol</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- el contrato generado, tal cual, desde el repo del protocolo -->
+    <Compile Include="..\..\..\mex-orbit-protocol\gen\csharp\Messages.g.cs" Link="Messages.g.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MexOrbit.GameServer.Application\MexOrbit.GameServer.Application.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,14 +1,13 @@
-// Los puertos de persistencia: lo que la simulacion NECESITA saber de la BD,
-// dicho en su idioma y no en el de MySQL.
-//
-// Antes `World` y `Universe` recibian el `Repo` concreto —sellado, con Dapper y
-// MySqlConnector dentro— asi que no habia forma de simular un tick sin una base
-// de datos delante. La cebolla exige que la flecha apunte al reves: la capa de
-// dentro declara el contrato y la de fuera lo cumple.
+// Los puertos: lo que la simulacion NECESITA del mundo exterior, dicho en su
+// idioma. Ni una sola de estas interfaces menciona MySQL, WebSockets ni varints.
 //
 // Estan partidos por MOTIVO, no por tabla: quien lee catalogos al arrancar un
 // mapa no tiene nada que ver con quien mueve credits dentro de una transaccion.
-namespace MexOrbit.GameServer.Data;
+using MexOrbit.GameServer.Domain;
+
+namespace MexOrbit.GameServer.Application;
+
+// ─── persistencia ───────────────────────────────────────────────────────────
 
 /// <summary>Los mapas y su topologia: donde se entra, que hay, quien lo sirve.</summary>
 public interface IMapCatalog
@@ -68,4 +67,39 @@ public interface IEconomyRepository
     UnloadOutcome UnloadAndRefine(long accountId, RefineRecipe? receta);
     (uint Sold, decimal Gained, decimal NewCredits) SellToNpc(
         long accountId, long itemId, uint amount, decimal price);
+}
+
+// ─── el cliente ─────────────────────────────────────────────────────────────
+
+/// <summary>Un cliente conectado, visto desde dentro: una cuenta, un buzon de
+/// salida y una forma de colgar. El mundo NO sabe si detras hay un WebSocket.</summary>
+public interface IClientPort
+{
+    long AccountId { get; }
+    void Send(byte[] frame);
+    void CloseSocket();
+}
+
+/// <summary>El traductor al cable.
+///
+/// Devuelve el frame ya montado para que el broadcast codifique UNA vez y mande
+/// el MISMO array a todos: sacar el protocolo del dominio no puede costar N
+/// serializaciones por evento.</summary>
+public interface IServerCodec
+{
+    byte[] Encode(ServerEvent evento);
+}
+
+/// <summary>Verificacion del game ticket emitido por la api. El game server solo
+/// tiene la clave PUBLICA: no puede emitir, solo validar.</summary>
+public interface ITicketVerifier
+{
+    (long AccountId, ErrorCode? Error) Verify(string jwt, int expectedProtocolVersion);
+}
+
+/// <summary>El reloj de pared, inyectado. Cero `DateTime.Now` disperso: es uno de
+/// los nueve vicios documentados del server legado.</summary>
+public interface IClock
+{
+    long UnixMs { get; }
 }

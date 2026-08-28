@@ -1,8 +1,10 @@
 // Entidades del mundo: jugadores y NPCs, sobre el mismo modelo de movimiento.
 // Convencion de ids: jugador = account_id · NPC = 1_000_000 + n (documentado en el cliente).
-using MexOrbit.Protocol;
-
-namespace MexOrbit.GameServer.Game;
+//
+// Ya no sabe convertirse en mensajes: `ToSpawn()` y `ToMove()` vivian aqui y
+// metian el protocolo binario dentro del dominio. Ahora la nave es una nave, y
+// quien la pone en el cable es el codec.
+namespace MexOrbit.GameServer.Domain;
 
 public sealed class Entity
 {
@@ -24,6 +26,11 @@ public sealed class Entity
 
     public bool Moving => Math.Abs(X - TargetX) > 0.5 || Math.Abs(Y - TargetY) > 0.5;
 
+    public float HpPct => MaxHp == 0 ? 1f : (float)Hp / MaxHp;
+
+    /// <summary>Casco y escudo viajan por separado: son dos barras, no una suma.</summary>
+    public float ShieldPct => MaxShield == 0 ? 0f : (float)Shield / MaxShield;
+
     /// <summary>Avanza hacia el target a la velocidad de la entidad. Devuelve true si se movio.</summary>
     public bool Step(double dtSeconds)
     {
@@ -37,29 +44,10 @@ public sealed class Entity
         return true;
     }
 
-    public EntitySpawn ToSpawn() => new()
+    /// <summary>La planta donde este. Lo usa el golpe: frena en seco.</summary>
+    public void Detener()
     {
-        EntityId = Id,
-        Kind = Kind,
-        TypeId = TypeId,
-        Name = Name,
-        Faction = Faction,
-        X = (ulong)Math.Round(X),
-        Y = (ulong)Math.Round(Y),
-        HpPct = MaxHp == 0 ? 1f : (float)Hp / MaxHp,
-        Speed = Speed,
-        // casco y escudo viajan por separado: son dos barras, no una suma
-        ShieldPct = MaxShield == 0 ? 0f : (float)Shield / MaxShield,
-    };
-
-    public EntityMove ToMove(bool teleport = false) => new()
-    {
-        EntityId = Id,
-        X = (ulong)Math.Round(X),
-        Y = (ulong)Math.Round(Y),
-        TargetX = (ulong)Math.Round(TargetX),
-        TargetY = (ulong)Math.Round(TargetY),
-        Speed = Speed,
-        Teleport = teleport,
-    };
+        TargetX = X;
+        TargetY = Y;
+    }
 }

@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/MexOrbit.GameServer.Application/MexOrbit.GameServer.Application.csproj" />
+    <Project Path="src/MexOrbit.GameServer.Domain/MexOrbit.GameServer.Domain.csproj" />
+    <Project Path="src/MexOrbit.GameServer.Infrastructure/MexOrbit.GameServer.Infrastructure.csproj" />
+    <Project Path="src/MexOrbit.GameServer.Protocol/MexOrbit.GameServer.Protocol.csproj" />
     <Project Path="src/MexOrbit.GameServer/MexOrbit.GameServer.csproj" />
   </Folder>
   <Folder Name="/tests/">

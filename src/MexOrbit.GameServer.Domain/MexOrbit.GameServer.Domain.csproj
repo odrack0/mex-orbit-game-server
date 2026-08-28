@@ -1,0 +1,11 @@
+<!-- El centro de la cebolla. NO tiene ni una sola referencia: ni a la BD, ni al
+     protocolo, ni siquiera al logging. Si algun dia aparece un PackageReference
+     aqui, es que algo se colo donde no debia. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MexOrbit.GameServer.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>
