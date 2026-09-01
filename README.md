@@ -215,7 +215,7 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `HuidaMs` / `HuidaDistancia` | `Domain/Dials.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
 | `JumpRange` | `Domain/Dials.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
 | `MargenDelMapa` | `Domain/Dials.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |
-| `RadiationMargin` | `Domain/Dials.cs` | 1000 | Cuanto se puede rebasar el limite del mapa antes del borde de verdad, por los cuatro lados (negativo por el lado del 0) — **mismo numero en el cliente** (`world.gd`, `RADIACION_MARGEN`) |
+| `RadiationReach` | `Domain/Dials.cs` | 50 000 | Tope estructural del vuelo mas alla del mapa, por los cuatro lados (negativo por el lado del 0). **No es una pared que se sienta**: inalcanzable con vida (25 s a 2000 u/s; la radiacion mata en ~8) — **mismo numero en el cliente** (`world.gd`, `RADIACION_ALCANCE`) |
 | `RadiationTickMs` | `Domain/Dials.cs` | 1 s | Cadencia del daño por radiacion |
 | `RadiationInitialPct` / `RadiationEscalationPct` | `Domain/Dials.cs` | 10 % / +1 %/s | % del casco MAXIMO que cobra la zona radiactiva: 10, 11, 12... por segundo CONTINUO fuera del limite; directo al casco, el escudo no absorbe nada. Primer numero de diseño, sin calibrar contra el juego real (ver «Zona radiactiva» abajo) |
 
@@ -301,12 +301,15 @@ esta muerto, el jugador no vuela ni dispara, y los NPCs que lo tenian fichado lo
 
 ## Zona radiactiva
 
-Mas alla del limite publicado del mapa (`map_bounds.*`) la nave **sigue volando**: el
-clamp del servidor (`World.Session.cs`, `OnMoveIntent`) ya no corta en el limite a
-secas, corta en el limite **mas** `Dials.RadiationMargin` (1000 u) **por los cuatro
-lados** — el mismo margen que aplica el cliente sobre su propio clamp (`world.gd`,
-`RADIACION_MARGEN`), para que cliente y autoridad sigan coincidiendo en el destino
-tal como exige el resto del movimiento.
+Mas alla del limite publicado del mapa (`map_bounds.*`) la nave **sigue volando hasta
+explotar**: la radiacion es un reloj, no una pared. El clamp del servidor
+(`World.Session.cs`, `OnMoveIntent`) ya no corta en el limite — corta en
+`Dials.RadiationReach` (50 000 u mas alla, **por los cuatro lados**), que es un tope
+estructural puesto donde nadie llega con vida, y el mismo numero que aplica el cliente
+sobre su propio clamp (`world.gd`, `RADIACION_ALCANCE`), para que cliente y autoridad
+sigan coincidiendo en el destino tal como exige el resto del movimiento. La primera
+version tenia el tope a **1000 u**: en vivo se sentia como un muro a un paso del limite,
+que es justo lo que la radiacion no es.
 
 **Por el lado del 0 el margen es negativo, y eso costo una vuelta entera.** La
 primera version (1-sep por la mañana) solo funcionaba por la derecha y por abajo:

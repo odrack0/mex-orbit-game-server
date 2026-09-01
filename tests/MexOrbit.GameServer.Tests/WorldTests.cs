@@ -11,7 +11,7 @@ public class MovementTests
     private static TestWorld Empty() => new TestWorld().WithMap(20_800, 12_800, 10_000, 6_000, 1_500);
 
     [Fact]
-    public void The_destination_is_clamped_to_the_map_bounds_plus_the_radiation_margin()
+    public void The_destination_is_clamped_far_beyond_the_map_where_nobody_arrives_alive()
     {
         var m = Empty().Build();
         var p = m.Enter(1);
@@ -21,16 +21,16 @@ public class MovementTests
         m.Tick();
 
         // el Moving eterno del legado, imposible: el clamp es del servidor. Pero
-        // ya no al limite publicado a secas — la nave puede rebasarlo y entrar
-        // a la zona radiactiva (RadiationTests), asi que el tope de verdad esta
-        // 1000 unidades mas alla (Dials.RadiationMargin)
+        // NO al limite del mapa: mas alla esta la zona radiactiva y la nave
+        // sigue hasta explotar (RadiationTests). El tope es estructural
+        // (Dials.RadiationReach, 50 000 mas alla) — no una pared que se sienta
         var eco = p.Last<EntityMove>();
-        Assert.Equal(21_800L, eco.TargetX);
-        Assert.Equal(13_800L, eco.TargetY);
+        Assert.Equal(70_800L, eco.TargetX);
+        Assert.Equal(62_800L, eco.TargetY);
     }
 
     [Fact]
-    public void On_the_near_side_the_clamp_is_MINUS_the_margin_not_zero()
+    public void On_the_near_side_the_clamp_is_MINUS_the_reach_not_zero()
     {
         // Las coordenadas van con signo desde el 1-sep: antes cinco capas
         // (cliente, wire uint, Round, este clamp y la BD) dejaban el lado del 0
@@ -43,8 +43,8 @@ public class MovementTests
         m.Tick();
 
         var eco = p.Last<EntityMove>();
-        Assert.Equal(-1_000L, eco.TargetX);
-        Assert.Equal(-1_000L, eco.TargetY);
+        Assert.Equal(-50_000L, eco.TargetX);
+        Assert.Equal(-50_000L, eco.TargetY);
     }
 
     [Fact]

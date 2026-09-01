@@ -20,7 +20,7 @@ public class RadiationTests
         var p = m.Enter(1, shield: shield, data: m.Pilot(1, hp: hp, speed: 2_000, x: 20_700, y: 6_000));
         p.Clear();
 
-        m.W.Post(new MoveIntentCmd(p, 1, 21_500, 6_000));  // 800 u, dentro del margen de 1000
+        m.W.Post(new MoveIntentCmd(p, 1, 21_500, 6_000));  // 800 u mas alla del limite
         // un tick primero para que el comando se procese y el destino cambie:
         // `TickUntil` mira la condicion ANTES de tickear, y "parada" es cierto
         // tanto antes de arrancar como al llegar — sin este tick nunca arranca
@@ -48,7 +48,7 @@ public class RadiationTests
         var p = m.Enter(1, data: m.Pilot(1, hp: 1_000, speed: 2_000, x: 100, y: 6_000));
         p.Clear();
 
-        m.W.Post(new MoveIntentCmd(p, 1, -700, 6_000));   // 800 u, dentro del margen
+        m.W.Post(new MoveIntentCmd(p, 1, -700, 6_000));   // 800 u mas alla del 0
         m.Tick();
         m.TickUntil(() => !m.W.ShipOf(1)!.Moving, what: "cruza el 0 y llega");
 

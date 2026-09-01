@@ -58,10 +58,14 @@ public static class Dials
     public const int MapMargin = 500;
 
     // ─── zona radiactiva (mas alla del limite del mapa) ─────────────────────
-    /// <summary>Cuanto se puede rebasar el limite antes del borde de verdad.
-    /// La nave SIGUE volando ahi dentro; ver Rules.cs (Combat.RadiationDamage)
-    /// para lo que le cuesta quedarse.</summary>
-    public const uint RadiationMargin = 1_000;
+    /// <summary>Hasta donde se puede seguir volando mas alla del limite. NO es
+    /// una pared que se sienta: la radiacion es un reloj, no un borde, y la
+    /// nave avanza hasta explotar. Esto es un tope estructural para que el
+    /// Moving eterno del legado siga siendo imposible — inalcanzable con vida:
+    /// a 2000 u/s (el tope del cable) son 25 s, y desde casco lleno la
+    /// radiacion mata en ~8 (10+11+...+17 % > 100). La primera version lo tenia
+    /// en 1000 y se sentia como un muro a un paso del limite.</summary>
+    public const uint RadiationReach = 50_000;
     /// <summary>Cadencia del daño por radiacion.</summary>
     public const int RadiationTickMs = 1_000;
     /// <summary>El primer segundo fuera del limite ya duele: 10% del casco

@@ -18,7 +18,7 @@ public static class Geometry
     }
 
     /// <summary>Fuera de los limites publicados del mapa: la zona radiactiva
-    /// (hasta donde se puede llegar de verdad lo dice Dials.RadiationMargin).</summary>
+    /// (ahi la nave sigue hasta explotar; el tope estructural es Dials.RadiationReach).</summary>
     public static bool OutsideBounds(double x, double y, MapInfo map) =>
         x < 0 || x > map.BoundsX || y < 0 || y > map.BoundsY;
 

@@ -1,6 +1,7 @@
 // La zona radiactiva: mas alla del limite publicado del mapa la nave SIGUE
-// volando (hasta Dials.RadiationMargin — el clamp de verdad esta en
-// World.Session.cs), pero paga por segundo. La formula vive en Rules.cs
+// volando hasta explotar (el tope estructural, Dials.RadiationReach, esta
+// donde nadie llega con vida; el clamp esta en World.Session.cs), pero paga
+// por segundo. La formula vive en Rules.cs
 // (Combat.RadiationDamage), pura y sin estado; aqui solo el reloj por jugador.
 using MexOrbit.GameServer.Domain;
 
