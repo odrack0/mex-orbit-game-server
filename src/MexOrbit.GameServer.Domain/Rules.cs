@@ -17,6 +17,11 @@ public static class Geometry
         return Math.Sqrt(dx * dx + dy * dy);
     }
 
+    /// <summary>Fuera de los limites publicados del mapa: la zona radiactiva
+    /// (hasta donde se puede llegar de verdad lo dice Dials.RadiationMargin).</summary>
+    public static bool OutsideBounds(double x, double y, MapInfo map) =>
+        x < 0 || x > map.BoundsX || y < 0 || y > map.BoundsY;
+
     /// <summary>Un punto del circulo de radio `radio` alrededor de (x,y), recortado
     /// al mapa. Asi los bichos RODEAN en vez de amontonarse en el mismo pixel.</summary>
     public static (double X, double Y) OnCircle(double x, double y, double radius,
@@ -51,6 +56,15 @@ public static class Combat
     {
         if (npc.Shield >= npc.MaxShield) return;
         npc.Shield = Math.Min(npc.MaxShield, npc.Shield + Math.Max(1, npc.MaxShield / 10));
+    }
+
+    /// <summary>Cuanto cobra la radiacion en el segundo N de exposicion
+    /// CONTINUA (1, 2, 3...): 10%, 11%, 12%... del casco MAXIMO, directo — a
+    /// diferencia del laser, aqui el escudo no absorbe nada.</summary>
+    public static uint RadiationDamage(Entity ship, uint secondsInZone)
+    {
+        var pct = Dials.RadiationInitialPct + (secondsInZone - 1) * Dials.RadiationEscalationPct;
+        return (uint)Math.Min(ship.MaxHp, Math.Round(ship.MaxHp * pct / 100.0));
     }
 
     /// <summary>Un cobarde huye cuando su casco cae por debajo de su umbral.

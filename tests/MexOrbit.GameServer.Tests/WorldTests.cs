@@ -11,7 +11,7 @@ public class MovementTests
     private static TestWorld Empty() => new TestWorld().WithMap(20_800, 12_800, 10_000, 6_000, 1_500);
 
     [Fact]
-    public void The_destination_is_clamped_to_the_map_bounds()
+    public void The_destination_is_clamped_to_the_map_bounds_plus_the_radiation_margin()
     {
         var m = Empty().Build();
         var p = m.Enter(1);
@@ -20,10 +20,13 @@ public class MovementTests
         m.W.Post(new MoveIntentCmd(p, 1, 999_999, 999_999));
         m.Tick();
 
-        // el Moving eterno del legado, imposible: el clamp es del servidor
+        // el Moving eterno del legado, imposible: el clamp es del servidor. Pero
+        // ya no al limite publicado a secas — la nave puede rebasarlo y entrar
+        // a la zona radiactiva (RadiationTests), asi que el tope de verdad esta
+        // 1000 unidades mas alla (Dials.RadiationMargin)
         var eco = p.Last<EntityMove>();
-        Assert.Equal(20_800ul, eco.TargetX);
-        Assert.Equal(12_800ul, eco.TargetY);
+        Assert.Equal(21_800ul, eco.TargetX);
+        Assert.Equal(13_800ul, eco.TargetY);
     }
 
     [Fact]

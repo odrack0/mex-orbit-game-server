@@ -266,6 +266,6 @@ public sealed partial class World
             slot.Entity.Hp, slot.Entity.Shield, false, "ammo_cel_1", false));
         Send(slot, HeroStatsOf(slot));
 
-        if (slot.Entity.Hp == 0) OnPlayerKilled(slot, npc);
+        if (slot.Entity.Hp == 0) OnPlayerKilled(slot, npc.Id, npc.Name, DeathCause.Npc);
     }
 }

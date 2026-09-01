@@ -10,6 +10,7 @@
 //   · World.Cargo.cs     cajas, la base, descarga y venta
 //   · World.Session.cs   entrar, volver, salir, moverse, hablar y saltar
 //   · World.Relevance.cs el diff de visibilidad y la difusion dirigida
+//   · World.Radiation.cs la zona radiactiva, mas alla del limite del mapa
 using System.Threading.Channels;
 using MexOrbit.GameServer.Domain;
 using Microsoft.Extensions.Logging;
@@ -49,6 +50,11 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         public bool AtStation;                              // dentro del rango de la estacion
         public string AmmoId = "ammo_cel_1";             // municion equipada (E3 la hara elegible)
         public bool Skilled;                             // disparo potenciado (perfil de piloto, E4)
+        // zona radiactiva (mas alla del limite del mapa; ver World.Radiation.cs)
+        public bool InRadiationZone;
+        /// <summary>Segundos CONSECUTIVOS de exposicion: alimenta el % escalante.</summary>
+        public uint RadiationSeconds;
+        public long NextRadiationTick;
         /// <summary>Ya se le dijo que su objetivo esta fuera del alcance del laser.
         /// Se avisa UNA vez por espera, no una vez por tick.</summary>
         public bool WarnedOutOfRange;
@@ -141,6 +147,7 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
         }
 
         FireLasers();
+        UpdateRadiation();
         ExpireBoxes();
         RespawnNpcs();
         SweepExpiredGraces();

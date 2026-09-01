@@ -112,8 +112,12 @@ public sealed partial class World
 
     /// <summary>Muerte del jugador. La bodega VOLANTE se queda en el sitio dentro
     /// de una caja: transferencia, no destruccion (guidelines §7). El almacen de
-    /// la base no se toca — para eso esta separado del hold.</summary>
-    private void OnPlayerKilled(PlayerSlot slot, Entity killer)
+    /// la base no se toca — para eso esta separado del hold.
+    ///
+    /// `killerId`/`killerName` en vez de un `Entity killer`: la radiacion mata
+    /// (World.Radiation.cs) y no es una entidad — no hay a quien apuntar salvo
+    /// a la propia victima.</summary>
+    private void OnPlayerKilled(PlayerSlot slot, ulong killerId, string killerName, DeathCause cause)
     {
         slot.Dead = true;
         slot.LaserOn = false;
@@ -121,7 +125,7 @@ public sealed partial class World
         slot.Entity.Stop();
         foreach (var ai in _npcAi.Values.Where(a => a.TargetId == slot.Entity.Id)) ai.Forget();
 
-        ToThoseWhoSee(slot.Entity.Id, new EntityDestroyed(slot.Entity.Id, killer.Id));
+        ToThoseWhoSee(slot.Entity.Id, new EntityDestroyed(slot.Entity.Id, killerId));
         ForgetEntity(slot.Entity.Id);
 
         if (slot.Cargo.Count > 0)
@@ -134,9 +138,9 @@ public sealed partial class World
 
         // en el slice hay una sola opcion; el contrato ya transporta coste y
         // disponibilidad para las demas
-        Send(slot, new RespawnOffered(DeathCause.Npc, killer.Name,
+        Send(slot, new RespawnOffered(cause, killerName,
             [new RespawnChoice(1, "respawn.base", 0, true)]));
-        log.LogInformation("cuenta {id} destruida por {npc}", slot.Data.AccountId, killer.Name);
+        log.LogInformation("cuenta {id} destruida por {killer}", slot.Data.AccountId, killerName);
     }
 
     private void OnRespawnSelect(RespawnSelectCmd cmd)

@@ -215,6 +215,9 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `HuidaMs` / `HuidaDistancia` | `Domain/Dials.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
 | `JumpRange` | `Domain/Dials.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
 | `MargenDelMapa` | `Domain/Dials.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |
+| `RadiationMargin` | `Domain/Dials.cs` | 1000 | Cuanto se puede rebasar el limite del mapa antes del borde de verdad — **mismo numero en el cliente** (`world.gd`, `RADIACION_MARGEN`) |
+| `RadiationTickMs` | `Domain/Dials.cs` | 1 s | Cadencia del daño por radiacion |
+| `RadiationInitialPct` / `RadiationEscalationPct` | `Domain/Dials.cs` | 10 % / +1 %/s | % del casco MAXIMO que cobra la zona radiactiva: 10, 11, 12... por segundo CONTINUO fuera del limite; directo al casco, el escudo no absorbe nada. Primer numero de diseño, sin calibrar contra el juego real (ver «Zona radiactiva» abajo) |
 
 ## La IA de los NPCs
 
@@ -295,6 +298,33 @@ dia uno. La salida se asienta en el ledger como `CARGO_LOST` con la caja como re
 Despues el server manda `RespawnOptions`. En el slice hay una sola opcion (volver a la base,
 entera y gratis); el contrato ya transporta coste y disponibilidad para las demas. Mientras
 esta muerto, el jugador no vuela ni dispara, y los NPCs que lo tenian fichado lo olvidan.
+
+## Zona radiactiva
+
+Mas alla del limite publicado del mapa (`map_bounds.*`) la nave **sigue volando**: el
+clamp del servidor (`World.Session.cs`, `OnMoveIntent`) ya no corta en el limite a
+secas, corta en el limite **mas** `Dials.RadiationMargin` (1000 u) — el mismo margen
+que aplica el cliente sobre su propio clamp (`world.gd`, `RADIACION_MARGEN`), para
+que cliente y autoridad sigan coincidiendo en el destino tal como exige el resto del
+movimiento.
+
+Fuera del limite, cada segundo **continuo** de exposicion cobra un % del casco
+**maximo**, directo — a diferencia del laser, el escudo no absorbe nada
+(`World.Radiation.cs`, formula pura en `Combat.RadiationDamage`). Empieza en
+`RadiationInitialPct` (10 %) y sube `RadiationEscalationPct` (1 punto) cada segundo
+que se sigue ahi: 10, 11, 12... El primer golpe pega **en el mismo tick** que se
+cruza el limite, no un segundo despues. Volver dentro del limite reinicia el
+contador a cero (edge-triggered, igual que el `Storage.IsInRadiationZone` del
+prototipo): la escalada es por estancia continua, no una cuenta de por vida.
+
+Si el casco llega a 0 ahi fuera, la muerte es por `DeathCause.Radiation` — no hay
+agresor, así que `killer_id` es la propia nave y el nombre que ve el jugador es
+"la radiación" (mismo `RespawnOptions`/`EntityDestroyed` que cualquier otra muerte).
+
+**Numeros de diseño, no calibrados contra el juego real.** A diferencia del daño
+plano del prototipo (fijo, sin escalar), este es el primer intento de una curva
+porcentual; si en juego se siente demasiado suave o demasiado dura, los diales a
+tocar son exactamente esos dos, en `Domain/Dials.cs`.
 
 ## Mobiliario del mapa
 

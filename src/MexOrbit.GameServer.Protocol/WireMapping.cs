@@ -46,6 +46,7 @@ internal static class WireMapping
     {
         D.DeathCause.Npc => W.DeathCause.Npc,
         D.DeathCause.Player => W.DeathCause.Player,
+        D.DeathCause.Radiation => W.DeathCause.Radiation,
         _ => throw new ArgumentOutOfRangeException(nameof(v), v, "DeathCause sin traduccion"),
     };
 

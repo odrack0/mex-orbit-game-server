@@ -16,7 +16,7 @@ public enum BoxDespawnReason { Collected, Expired, Range }
 
 public enum Weapon { Laser }
 
-public enum DeathCause { Npc, Player }
+public enum DeathCause { Npc, Player, Radiation }
 
 public enum ChatChannel { Global, Faction, Clan }
 

@@ -56,4 +56,19 @@ public static class Dials
 
     /// <summary>El margen que los NPC dejan a los bordes al elegir destino.</summary>
     public const int MapMargin = 500;
+
+    // ─── zona radiactiva (mas alla del limite del mapa) ─────────────────────
+    /// <summary>Cuanto se puede rebasar el limite antes del borde de verdad.
+    /// La nave SIGUE volando ahi dentro; ver Rules.cs (Combat.RadiationDamage)
+    /// para lo que le cuesta quedarse.</summary>
+    public const uint RadiationMargin = 1_000;
+    /// <summary>Cadencia del daño por radiacion.</summary>
+    public const int RadiationTickMs = 1_000;
+    /// <summary>El primer segundo fuera del limite ya duele: 10% del casco
+    /// MAXIMO, directo — a diferencia del laser, aqui el escudo no absorbe nada.</summary>
+    public const uint RadiationInitialPct = 10;
+    /// <summary>Y cada segundo mas que se sigue ahi, un punto porcentual encima
+    /// (10, 11, 12...). Se reinicia en cuanto se vuelve dentro del limite: la
+    /// escalada es por exposicion CONTINUA, no acumulada de por vida.</summary>
+    public const uint RadiationEscalationPct = 1;
 }

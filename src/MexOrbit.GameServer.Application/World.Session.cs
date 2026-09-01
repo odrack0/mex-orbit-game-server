@@ -152,9 +152,12 @@ public sealed partial class World
         // seq monotona: lo viejo o duplicado se descarta sin drama
         if (move.Seq <= slot.LastSeq) return;
         slot.LastSeq = move.Seq;
-        // clamp server-side a los limites del mapa: el Moving eterno del legado, imposible
-        slot.Entity.TargetX = Math.Clamp(move.TargetX, 0, map.BoundsX);
-        slot.Entity.TargetY = Math.Clamp(move.TargetY, 0, map.BoundsY);
+        // clamp server-side: el Moving eterno del legado, imposible. Pero no al
+        // limite publicado del mapa — a ESE mas el margen de la zona radiactiva
+        // (Dials.RadiationMargin): la nave puede rebasar el limite y seguir
+        // volando, solo que a partir de ahi paga por segundo (World.Radiation.cs).
+        slot.Entity.TargetX = Math.Clamp(move.TargetX, 0, map.BoundsX + Dials.RadiationMargin);
+        slot.Entity.TargetY = Math.Clamp(move.TargetY, 0, map.BoundsY + Dials.RadiationMargin);
         // eco autoritativo a TODOS, heroe incluido: contra esto se reconcilia el cliente
         ToThoseWhoSee(slot.Entity.Id, new EntityMoved(slot.Entity));
     }
