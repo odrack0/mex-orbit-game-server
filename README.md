@@ -215,7 +215,7 @@ Constantes calibrables del codigo (los numeros de JUEGO viven en BD). **Regla de
 | `HuidaMs` / `HuidaDistancia` | `Domain/Dials.cs` | 12 s / 2500 | Cuanto corre un cobarde y hasta donde |
 | `JumpRange` | `Domain/Dials.cs` | 600 | Hay que estar JUNTO al portal para saltar (se valida en el server) |
 | `MargenDelMapa` | `Domain/Dials.cs` | 500 | Margen que los NPC dejan a los bordes al elegir destino |
-| `RadiationMargin` | `Domain/Dials.cs` | 1000 | Cuanto se puede rebasar el limite del mapa antes del borde de verdad — **mismo numero en el cliente** (`world.gd`, `RADIACION_MARGEN`) |
+| `RadiationMargin` | `Domain/Dials.cs` | 1000 | Cuanto se puede rebasar el limite del mapa antes del borde de verdad, por los cuatro lados (negativo por el lado del 0) — **mismo numero en el cliente** (`world.gd`, `RADIACION_MARGEN`) |
 | `RadiationTickMs` | `Domain/Dials.cs` | 1 s | Cadencia del daño por radiacion |
 | `RadiationInitialPct` / `RadiationEscalationPct` | `Domain/Dials.cs` | 10 % / +1 %/s | % del casco MAXIMO que cobra la zona radiactiva: 10, 11, 12... por segundo CONTINUO fuera del limite; directo al casco, el escudo no absorbe nada. Primer numero de diseño, sin calibrar contra el juego real (ver «Zona radiactiva» abajo) |
 
@@ -303,10 +303,25 @@ esta muerto, el jugador no vuela ni dispara, y los NPCs que lo tenian fichado lo
 
 Mas alla del limite publicado del mapa (`map_bounds.*`) la nave **sigue volando**: el
 clamp del servidor (`World.Session.cs`, `OnMoveIntent`) ya no corta en el limite a
-secas, corta en el limite **mas** `Dials.RadiationMargin` (1000 u) — el mismo margen
-que aplica el cliente sobre su propio clamp (`world.gd`, `RADIACION_MARGEN`), para
-que cliente y autoridad sigan coincidiendo en el destino tal como exige el resto del
-movimiento.
+secas, corta en el limite **mas** `Dials.RadiationMargin` (1000 u) **por los cuatro
+lados** — el mismo margen que aplica el cliente sobre su propio clamp (`world.gd`,
+`RADIACION_MARGEN`), para que cliente y autoridad sigan coincidiendo en el destino
+tal como exige el resto del movimiento.
+
+**Por el lado del 0 el margen es negativo, y eso costo una vuelta entera.** La
+primera version (1-sep por la mañana) solo funcionaba por la derecha y por abajo:
+el reporte en vivo fue «la nave se para en seco en el borde», y el log del server
+lo dijo claro — todo llegaba como `pidio (0, y)`. No era el clamp de radiacion:
+eran **cinco capas** que daban por hecho coordenadas sin signo, cada una
+suficiente sola para dejar el borde en pared: el `Vector2.ZERO` del clamp del
+cliente, el `uint` del cable (`MoveIntent`, `EntityMove`, `EntitySpawn`,
+`BoxSpawn`), el `Math.Max(0, v)` de `WireMapping.Round`, el `0` de este clamp y
+el `INT UNSIGNED` de `player_ship_state.pos_x/pos_y`. Ahora las coordenadas de
+entidades y cajas van en `sint` (zigzag) en el protocolo, `PlayerData.PosX/PosY`
+son `int`, y la migracion `2026.09.01.1` firma la columna. **Es un cambio de
+encoding del mismo tag, no un tag nuevo: game server, cliente y migracion se
+despliegan JUNTOS** (en astrion tambien). El mobiliario (`map_station`,
+`map_portal`, `EnterMap`) se queda sin signo: una base nunca esta fuera del mapa.
 
 Fuera del limite, cada segundo **continuo** de exposicion cobra un % del casco
 **maximo**, directo — a diferencia del laser, el escudo no absorbe nada

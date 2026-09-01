@@ -86,6 +86,8 @@ internal static class WireMapping
     };
 
     /// <summary>Las coordenadas viajan enteras: el mundo simula en doubles y el
-    /// cable no necesita esa precision.</summary>
-    public static ulong Round(double v) => (ulong)Math.Round(Math.Max(0, v));
+    /// cable no necesita esa precision. Con SIGNO: la zona radiactiva por el
+    /// lado del 0 es negativa, y el `Math.Max(0, v)` que habia aqui era una de
+    /// las cinco capas que la dejaban en pared.</summary>
+    public static long Round(double v) => (long)Math.Round(v);
 }

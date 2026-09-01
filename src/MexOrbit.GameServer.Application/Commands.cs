@@ -23,7 +23,7 @@ public sealed record ResumeCmd(IClientPort Port, long AccountId, long SessionId,
 
 public sealed record LeaveCmd(IClientPort Port, string Reason) : WorldCmd(Port);
 
-public sealed record MoveIntentCmd(IClientPort Port, ulong Seq, uint TargetX, uint TargetY)
+public sealed record MoveIntentCmd(IClientPort Port, ulong Seq, long TargetX, long TargetY)
     : WorldCmd(Port);
 
 public sealed record PongCmd(IClientPort Port, ulong Nonce) : WorldCmd(Port);

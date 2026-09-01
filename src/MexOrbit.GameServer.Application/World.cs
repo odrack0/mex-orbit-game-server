@@ -307,7 +307,7 @@ public sealed partial class World(MapInfo map, List<NpcSpawnInfo> npcSpawns,
     private void SaveShip(PlayerSlot slot)
     {
         var (id, mapId, x, y, hp, esc) = (slot.Data.AccountId, map.Id,
-            (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield);
+            (int)Math.Round(slot.Entity.X), (int)Math.Round(slot.Entity.Y), slot.Entity.Hp, slot.Entity.Shield);
         _ = Task.Run(() => Safe(() => players.SaveShipState(id, mapId, x, y, hp, esc), "SaveShipState"));
     }
 

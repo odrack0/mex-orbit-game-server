@@ -108,7 +108,7 @@ public static class Wire
 /// para poder afirmar QUE se persistio sin levantar MySQL.</summary>
 public sealed class FakeDb : IPlayerRepository, ISessionRepository, IEconomyRepository
 {
-    public readonly List<(long AccountId, long MapId, uint X, uint Y, uint Hp, uint Shield)> SavedStates = [];
+    public readonly List<(long AccountId, long MapId, int X, int Y, uint Hp, uint Shield)> SavedStates = [];
     public readonly List<(long SessionId, string Reason)> ClosedSessions = [];
     public readonly List<(long AccountId, decimal Delta, string Reason, long? Ref)> CreditEntries = [];
     public readonly List<(long AccountId, long BoxRef)> ClearedCargo = [];
@@ -127,7 +127,7 @@ public sealed class FakeDb : IPlayerRepository, ISessionRepository, IEconomyRepo
     public uint LoadShieldCapacity(long accountId) => 0;
     public Dictionary<long, uint> LoadCargo(long accountId) => new(Hold);
 
-    public void SaveShipState(long accountId, long mapId, uint x, uint y, uint hp, uint shield)
+    public void SaveShipState(long accountId, long mapId, int x, int y, uint hp, uint shield)
     {
         if (FailsOnSave) throw new InvalidOperationException("BD caida");
         lock (SavedStates) SavedStates.Add((accountId, mapId, x, y, hp, shield));

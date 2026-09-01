@@ -77,7 +77,7 @@ public sealed class PlayerRepository(string connectionString)
     }
 
     /// <summary>Write-behind del estado en vivo: la UNICA escritura caliente (esquema-v1 §5).</summary>
-    public void SaveShipState(long accountId, long mapId, uint x, uint y, uint hp, uint shield)
+    public void SaveShipState(long accountId, long mapId, int x, int y, uint hp, uint shield)
     {
         using var db = Open();
         db.Execute(

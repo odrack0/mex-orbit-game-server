@@ -25,8 +25,26 @@ public class MovementTests
         // a la zona radiactiva (RadiationTests), asi que el tope de verdad esta
         // 1000 unidades mas alla (Dials.RadiationMargin)
         var eco = p.Last<EntityMove>();
-        Assert.Equal(21_800ul, eco.TargetX);
-        Assert.Equal(13_800ul, eco.TargetY);
+        Assert.Equal(21_800L, eco.TargetX);
+        Assert.Equal(13_800L, eco.TargetY);
+    }
+
+    [Fact]
+    public void On_the_near_side_the_clamp_is_MINUS_the_margin_not_zero()
+    {
+        // Las coordenadas van con signo desde el 1-sep: antes cinco capas
+        // (cliente, wire uint, Round, este clamp y la BD) dejaban el lado del 0
+        // en pared y la radiacion solo existia por la derecha y por abajo.
+        var m = Empty().Build();
+        var p = m.Enter(1);
+        p.Clear();
+
+        m.W.Post(new MoveIntentCmd(p, 1, -999_999, -999_999));
+        m.Tick();
+
+        var eco = p.Last<EntityMove>();
+        Assert.Equal(-1_000L, eco.TargetX);
+        Assert.Equal(-1_000L, eco.TargetY);
     }
 
     [Fact]
@@ -42,7 +60,7 @@ public class MovementTests
 
         var ecos = p.All<EntityMove>().Where(e => e.EntityId == 1).ToList();
         Assert.Single(ecos);
-        Assert.Equal(11_000ul, ecos[0].TargetX);
+        Assert.Equal(11_000L, ecos[0].TargetX);
     }
 
     [Fact]
@@ -279,8 +297,8 @@ public class PlayerDeathTests
         m.Tick();
 
         var ship = p.All<EntitySpawn>().Last(e => e.EntityId == 1);
-        Assert.Equal(100ul, ship.X);          // la estacion del mapa
-        Assert.Equal(100ul, ship.Y);
+        Assert.Equal(100L, ship.X);           // la estacion del mapa
+        Assert.Equal(100L, ship.Y);
         Assert.Equal(1f, ship.HpPct);
         Assert.Equal(150u, p.Last<HeroStats>().Hp);
     }

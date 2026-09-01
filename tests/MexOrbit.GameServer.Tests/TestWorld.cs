@@ -128,7 +128,7 @@ public sealed class TestWorld
 
     public PlayerData Pilot(long accountId, string nombre = "Pilot", byte faction = 1,
         uint hp = 4_000, ushort speed = 320, uint hold = 300,
-        uint x = 10_000, uint y = 6_000) =>
+        int x = 10_000, int y = 6_000) =>
         new(accountId, nombre, faction, "phoenix", hp, speed, hold, hp, 0, x, y, 0m, Map.Id);
 
     /// <summary>Entra al mundo por el mismo camino que el juego: un JoinCmd al
@@ -156,7 +156,7 @@ public sealed class TestWorld
         var targetX = Math.Clamp(x, 0, Map.BoundsX);
         var targetY = Math.Clamp(y, 0, Map.BoundsY);
         W.Post(new MoveIntentCmd(port, NextSeq(port.AccountId),
-            (uint)Math.Round(targetX), (uint)Math.Round(targetY)));
+            (long)Math.Round(targetX), (long)Math.Round(targetY)));
         var dist = Math.Sqrt(Math.Pow(targetX - fromX, 2) + Math.Pow(targetY - fromY, 2));
         var step = speed * Dt;
         Tick((int)Math.Ceiling(dist / step) + 1);

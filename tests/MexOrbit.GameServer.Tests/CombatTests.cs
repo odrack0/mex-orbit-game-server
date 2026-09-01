@@ -174,7 +174,7 @@ public class CombatTests
         // de su circulo de aproximacion (300), que es donde se puede medir si cierra
         var x = Math.Clamp(npc.X + 550, 0, 20_800);
         var p = m.Enter(1, laserDamage: 10,
-            data: m.Pilot(1, x: (uint)Math.Round(x), y: (uint)Math.Round(npc.Y)));
+            data: m.Pilot(1, x: (int)Math.Round(x), y: (int)Math.Round(npc.Y)));
         var before = Geometry.Distance(npc.X, npc.Y, x, npc.Y);
 
         Fire(m, p, npc);
@@ -202,7 +202,7 @@ public class CombatTests
         var npc = m.FirstNpc();
         var x = Math.Clamp(npc.X + 400, 0, 20_800);
         var p = m.Enter(1, laserDamage: 10,
-            data: m.Pilot(1, x: (uint)Math.Round(x), y: (uint)Math.Round(npc.Y)));
+            data: m.Pilot(1, x: (int)Math.Round(x), y: (int)Math.Round(npc.Y)));
         p.Clear();
 
         Fire(m, p, npc);

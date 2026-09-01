@@ -44,7 +44,7 @@ public interface IPlayerRepository
     uint LoadLaserDamage(long accountId);
     uint LoadShieldCapacity(long accountId);
     Dictionary<long, uint> LoadCargo(long accountId);
-    void SaveShipState(long accountId, long mapId, uint x, uint y, uint hp, uint shield);
+    void SaveShipState(long accountId, long mapId, int x, int y, uint hp, uint shield);
 }
 
 /// <summary>Sesion unica por cuenta: abrir expulsando, resolver el token de

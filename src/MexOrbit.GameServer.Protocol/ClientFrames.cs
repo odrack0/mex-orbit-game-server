@@ -66,7 +66,7 @@ public static class ClientFrames
     private static WorldCmd Move(IClientPort port, byte[] frame)
     {
         var m = W.MoveIntent.Decode(frame);
-        return new MoveIntentCmd(port, m.Seq, (uint)m.TargetX, (uint)m.TargetY);
+        return new MoveIntentCmd(port, m.Seq, m.TargetX, m.TargetY);
     }
 
     private static WorldCmd Collect(IClientPort port, byte[] frame)

@@ -129,7 +129,7 @@ public class SessionTests
         // la carga no se toco: es el mismo slot, no uno nuevo
         Assert.Equal(42u, nuevo.Last<HeroStats>().Cargo);
         var heroe = nuevo.All<EntitySpawn>().First(e => e.EntityId == 1);
-        Assert.Equal(12_000ul, heroe.X);
+        Assert.Equal(12_000L, heroe.X);
     }
 
     [Fact]

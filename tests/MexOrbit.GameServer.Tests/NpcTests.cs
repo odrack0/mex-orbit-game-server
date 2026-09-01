@@ -40,8 +40,8 @@ public class NpcTests
         // el destino sale de los LIMITES DEL MAPA, no de una constante en codigo
         Assert.All(heading, r =>
         {
-            Assert.InRange(r.TargetX, 500ul, m.Map.BoundsX - 500);
-            Assert.InRange(r.TargetY, 500ul, m.Map.BoundsY - 500);
+            Assert.InRange(r.TargetX, 500L, m.Map.BoundsX - 500);
+            Assert.InRange(r.TargetY, 500L, m.Map.BoundsY - 500);
         });
     }
 
@@ -332,8 +332,8 @@ public class NpcTests
         Assert.Equal(1ul, death.KillerId);
 
         var box = p.Last<BoxSpawn>();
-        Assert.Equal((ulong)Math.Round(npc.X), box.X);
-        Assert.Equal((ulong)Math.Round(npc.Y), box.Y);
+        Assert.Equal((long)Math.Round(npc.X), box.X);
+        Assert.Equal((long)Math.Round(npc.Y), box.Y);
 
         // los credits se asientan SIEMPRE relativos y con su motivo
         Wait.A(() => m.Bd.CreditEntries.Count == 1, "el asiento de credits");

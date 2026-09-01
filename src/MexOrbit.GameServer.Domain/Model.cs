@@ -35,9 +35,11 @@ public sealed record NpcSpawnInfo(long CatalogId, string Code, string DisplayNam
     uint RespawnSeconds, ushort Amount, uint RewardExperience, uint RewardHonor, uint RewardCredits,
     uint CargoDropMin, uint CargoDropMax);
 
+/// <summary>La posicion va CON SIGNO: la zona radiactiva por el lado del 0 es
+/// negativa, y se persiste tal cual (player_ship_state.pos_x/pos_y son INT).</summary>
 public sealed record PlayerData(long AccountId, string PilotName, byte Faction, string ShipCode,
     uint BaseHp, ushort BaseSpeed, uint CargoCapacity, uint CurrentHp, uint CurrentShield,
-    uint PosX, uint PosY, decimal Credits, long MapId);
+    int PosX, int PosY, decimal Credits, long MapId);
 
 /// <summary>Una caja en el suelo: lo que solto un NPC al caer, o la bodega volante
 /// de un jugador destruido. Transferencia, no destruccion (guidelines §7).</summary>

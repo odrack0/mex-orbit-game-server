@@ -39,6 +39,25 @@ public class RadiationTests
     }
 
     [Fact]
+    public void The_near_side_of_the_map_is_radiation_too_not_a_wall()
+    {
+        // Lo que se reporto en vivo el 1-sep: por el lado del 0 la nave se paraba
+        // en seco. No era el clamp de radiacion — eran las coordenadas SIN SIGNO
+        // en cinco capas. Ahora x negativo es un destino como cualquier otro.
+        var m = Empty().Build();
+        var p = m.Enter(1, data: m.Pilot(1, hp: 1_000, speed: 2_000, x: 100, y: 6_000));
+        p.Clear();
+
+        m.W.Post(new MoveIntentCmd(p, 1, -700, 6_000));   // 800 u, dentro del margen
+        m.Tick();
+        m.TickUntil(() => !m.W.ShipOf(1)!.Moving, what: "cruza el 0 y llega");
+
+        Assert.Equal(-700L, p.Last<EntityMove>().TargetX);   // el eco tambien va con signo
+        Assert.Equal(-700.0, m.W.ShipOf(1)!.X);
+        Assert.Equal(900u, p.Last<HeroStats>().Hp);          // y cobra igual que el otro lado
+    }
+
+    [Fact]
     public void Staying_in_the_zone_escalates_one_point_per_second()
     {
         var (m, p) = EnterAndCross(hp: 1_000);

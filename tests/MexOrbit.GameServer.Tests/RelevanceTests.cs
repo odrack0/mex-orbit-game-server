@@ -21,7 +21,7 @@ public class RelevanceTests
         var m = Sector().WithDummy(hp: 100_000).Build();
         var npc = m.FirstNpc();
         var p = m.Enter(1, data: m.Pilot(1, hold: hold,
-            x: (uint)Math.Round(npc.X + distance), y: (uint)Math.Round(npc.Y)));
+            x: (int)Math.Round(npc.X + distance), y: (int)Math.Round(npc.Y)));
         return (m, p, npc);
     }
 
@@ -46,7 +46,7 @@ public class RelevanceTests
             30, 1, 0, 0, 0, 0, 0)).Build();
         var npc = m.FirstNpc();
         var p = m.Enter(1, data: m.Pilot(1,
-            x: (uint)Math.Clamp(npc.X + 6_000, 0, 20_800), y: (uint)Math.Round(npc.Y)));
+            x: (int)Math.Clamp(npc.X + 6_000, 0, 20_800), y: (int)Math.Round(npc.Y)));
         p.Clear();
 
         m.Seconds(5);
@@ -192,7 +192,7 @@ public class RelevanceTests
     {
         var (m, tirador, npc) = A(300);
         var testigo = m.Enter(2, data: m.Pilot(2, "Testigo",
-            x: (uint)Math.Round(npc.X + 300), y: (uint)Math.Round(npc.Y + 100)));
+            x: (int)Math.Round(npc.X + 300), y: (int)Math.Round(npc.Y + 100)));
         m.W.Post(new SelectTargetCmd(tirador, npc.Id));
         m.W.Post(new LaserToggleCmd(tirador, true));
         testigo.Clear();
@@ -213,7 +213,7 @@ public class RelevanceTests
             30, 1, 0, 0, 0, 30, 30)).Build();
         var npc = m.FirstNpc();
         var p = m.Enter(1, laserDamage: 100, data: m.Pilot(1,
-            x: (uint)Math.Round(npc.X + 200), y: (uint)Math.Round(npc.Y)));
+            x: (int)Math.Round(npc.X + 200), y: (int)Math.Round(npc.Y)));
         m.W.Post(new SelectTargetCmd(p, npc.Id));
         m.W.Post(new LaserToggleCmd(p, true));
         m.Tick();
@@ -240,7 +240,7 @@ public class RelevanceTests
         var npc = m.FirstNpc();
         var npcId = npc.Id;
         var p = m.Enter(1, laserDamage: 100, data: m.Pilot(1,
-            x: (uint)Math.Round(npc.X + 200), y: (uint)Math.Round(npc.Y)));
+            x: (int)Math.Round(npc.X + 200), y: (int)Math.Round(npc.Y)));
         m.W.Post(new SelectTargetCmd(p, npcId));
         m.W.Post(new LaserToggleCmd(p, true));
         m.Tick();
@@ -274,7 +274,7 @@ public class RelevanceTests
         var npc = m.FirstNpc();
         var npcId = npc.Id;
         var p = m.Enter(1, laserDamage: 100, data: m.Pilot(1,
-            x: (uint)Math.Round(npc.X + 200), y: (uint)Math.Round(npc.Y)));
+            x: (int)Math.Round(npc.X + 200), y: (int)Math.Round(npc.Y)));
         m.W.Post(new SelectTargetCmd(p, npcId));
         m.W.Post(new LaserToggleCmd(p, true));
         m.Tick();

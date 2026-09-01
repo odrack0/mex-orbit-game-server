@@ -132,7 +132,7 @@ public sealed partial class World
         Despawn(slot.Entity.Id, DespawnReason.Left);
         slot.Port.CloseSocket();
         var (id, mapId, x, y, hp, esc, sid) = (slot.Data.AccountId, map.Id,
-            (uint)slot.Entity.X, (uint)slot.Entity.Y, slot.Entity.Hp, slot.Entity.Shield,
+            (int)Math.Round(slot.Entity.X), (int)Math.Round(slot.Entity.Y), slot.Entity.Hp, slot.Entity.Shield,
             slot.SessionId);
         _ = Task.Run(() => Safe(() =>
         {
@@ -154,10 +154,11 @@ public sealed partial class World
         slot.LastSeq = move.Seq;
         // clamp server-side: el Moving eterno del legado, imposible. Pero no al
         // limite publicado del mapa — a ESE mas el margen de la zona radiactiva
-        // (Dials.RadiationMargin): la nave puede rebasar el limite y seguir
-        // volando, solo que a partir de ahi paga por segundo (World.Radiation.cs).
-        slot.Entity.TargetX = Math.Clamp(move.TargetX, 0, map.BoundsX + Dials.RadiationMargin);
-        slot.Entity.TargetY = Math.Clamp(move.TargetY, 0, map.BoundsY + Dials.RadiationMargin);
+        // (Dials.RadiationMargin) POR LOS CUATRO LADOS: por el lado del 0 el
+        // margen es negativo. La nave puede rebasar el limite y seguir volando,
+        // solo que a partir de ahi paga por segundo (World.Radiation.cs).
+        slot.Entity.TargetX = Math.Clamp(move.TargetX, -Dials.RadiationMargin, map.BoundsX + Dials.RadiationMargin);
+        slot.Entity.TargetY = Math.Clamp(move.TargetY, -Dials.RadiationMargin, map.BoundsY + Dials.RadiationMargin);
         // eco autoritativo a TODOS, heroe incluido: contra esto se reconcilia el cliente
         ToThoseWhoSee(slot.Entity.Id, new EntityMoved(slot.Entity));
     }
@@ -255,7 +256,8 @@ public sealed partial class World
         _players.Remove(accountId);
         Despawn(slot.Entity.Id, DespawnReason.Left);
         var (hp, esc) = (slot.Entity.Hp, slot.Entity.Shield);
-        players.SaveShipState(accountId, targetMapId, x, y, hp, esc);
+        // el punto de llegada es mobiliario (uint): un portal nunca deja en negativo
+        players.SaveShipState(accountId, targetMapId, (int)x, (int)y, hp, esc);
         // El socket NO se cierra aqui. Cerrarlo justo despues de mandar el aviso
         // era una carrera que el aviso perdia: el frame se queda en la cola de
         // salida y el cierre lo tira. Cierra el CLIENTE, que es quien sabe que ya
